@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <title>Wordle</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="styles/classicstyle.css">
+        <link rel="stylesheet" href="styles/mainstyle.css">
+    </head>
+    <body>
+        <div class="container">           
+            <h1 class="guess">Guess the word!</h1>
+            <h2></h2>
+            <button class="retry" onclick="location.reload()" hidden>Retry</button>
+        </div>
+        <button class="settings" onclick="document.querySelector('.dropdown').toggleAttribute('hidden')"></button>
+        <div class="dropdown" onmouseleave="this.setAttribute('hidden',true)" hidden > 
+            <div>
+                <h3>Themes</h3>
+                <ul>
+                    <li><button onclick="document.querySelector('link').setAttribute('href','styles/darkstyle.css')">Dark</button></li>
+                    <li><button onclick="document.querySelector('link').setAttribute('href','styles/lightstyle.css')">Light</button></li>
+                    <li><button onclick="document.querySelector('link').setAttribute('href','styles/classicstyle.css')">Classic</button></li>
+                </ul>
+            </div>
+        </div>
+        <div class="keyboard"><br></div>
+        <script src="scripts/words.js"></script>
+        <script src="scripts/main.js"></script>
+        <script src="scripts/vkeyboard.js"></script>
+    </body>
+</html>

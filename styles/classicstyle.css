@@ -1,0 +1,103 @@
+html{
+    background-color: rgb(99, 99, 99);
+    color: aliceblue;
+}
+
+.container,.keyboard,.dropdown{
+    background-color: rgb(46, 46, 46);
+    box-shadow: 10px 10px 30px rgb(20, 20, 20);
+}
+
+.letbox{
+    background-color: rgb(199, 205, 211);
+    color: rgb(37, 37, 37);
+    border: 1px solid rgb(204, 204, 204);
+    &.current{
+        background-color: aliceblue;
+    }
+    &.wrong{
+        background-color: rgb(148, 147, 147);
+        color: rgb(177, 177, 177);
+    }
+    &.right{
+        background-color: rgb(0, 255, 0);
+        color: rgb(42, 83, 42);
+    }
+    &.occurence{
+        background-color: rgb(255, 251, 0);
+        color: rgb(141, 88, 8);
+    }
+   
+    &.focus{
+        border-width: 2px;
+    }
+}
+
+button{
+    background-color: rgb(133, 133, 133);
+    box-shadow: 2px 2px 10px #000;
+    border: 2px solid rgb(88, 88, 88);
+    color: rgb(231, 231, 231);
+
+    &:hover{
+        background-color: rgb(100, 100, 100);
+        color: rgb(168, 168, 168);
+    }
+    &:active{
+        background-color: rgb(53, 53, 53);
+        color: rgb(109, 109, 109);
+    }
+
+    &.right{
+        background-color: rgb(0, 148, 0);
+        border-color:rgb(42, 83, 42);
+
+        &:hover{
+            background-color: rgb(7, 104, 7);
+        }
+        &:active{
+            background-color: rgb(4, 53, 4);
+        }
+    }
+
+    &.occurence{
+        background-color: rgb(187, 184, 21);
+        border-color:rgb(141, 88, 8);
+
+        &:hover{
+            background-color: rgb(109, 109, 19);
+        }
+        &:active{
+            background-color: rgb(75, 72, 14);
+        }
+    }
+
+    &.wrong{
+        background-color: rgb(77, 77, 77);
+
+        &:hover{
+            background-color: rgb(56, 56, 56);
+        }
+        &:active{
+            background-color: rgb(32, 32, 32);
+        }
+    }
+}
+
+.backspace{
+    background: url(../images/Backspace.png) no-repeat;
+    &:hover{background-image: url(../images/BackspaceHover.png);}
+    &:active{background-image: url(../images/BackspaceClicked.png);}
+}
+
+.enter{
+    background: url(../images/Enter.png) no-repeat;
+    &:hover{background-image: url(../images/EnterHover.png);}
+    &:active{background-image: url(../images/EnterClicked.png);}
+}
+
+.settings{
+    background: url(../images/Settings.png) no-repeat;
+    &:hover{background-image: url(../images/SettingsHover.png);}
+    &:active{background-image: url(../images/SettingsClicked.png);}
+}
