@@ -18,6 +18,8 @@ class HTTP:
             raw_lines = raw.replace('\r','').split('\n')
 
             self.Headers = raw_lines[0].split(' ')
+            if len(self.Headers) != 3:
+                raise TypeError("Not valid HTTP Request")
             raw_lines.pop(0)
 
             keyNval = ['','']
@@ -43,11 +45,9 @@ class HTTP:
         if self.Headers[0].split('/')[0] == "HTTP":
             self.Headers[1],self.Headers[2] = str(code),CODES[code]
         else:
-            raise AttributeError("Can't assign Status Code to HTTP Request. It's for Response only")
+            raise TypeError("Can't assign Status Code to HTTP Request. It's for Response only")
 
     def Raw(self) -> str:
-        if type(self.Body != str): 
-            raise TypeError("Can't get raw text, because the Body is Bytes class. Try using .RawBytes() method instead of .Raw()")
         raw_lines = [' '.join(self.Headers)]
         for i in self.__dict__.keys():
             if i != "Headers" and i != "Body":

@@ -3,7 +3,7 @@ import errno
 import gzip, zlib, brotli
 from pathlib import Path
 from http_class import HTTP
-CWD = Path('.').absolute().as_posix()
+CWD = Path('.').resolve().as_posix()
 HOST = '127.0.0.1'
 PORT = 3000
 ENCODING = [
@@ -38,7 +38,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                 response.StatusCode(200)
                 response.Content_Type = "text/html"
                 path = Path('index.html')
-            elif len(path.absolute().as_posix()) < len(CWD) or path.absolute().as_posix()[:len(CWD)] != CWD or '..' in path.as_posix():
+            elif not path.resolve().as_posix().startswith(CWD + '/'): # Helding Directory Traversal
                 response.StatusCode(400)
                 response.Content_Type = "text/html"
             elif Path(path).exists():
