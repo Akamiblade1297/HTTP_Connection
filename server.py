@@ -2,6 +2,7 @@ import socket
 # import asyncio
 from pathlib import Path
 from http_class import HTTP
+CWD = Path('.').absolute().as_posix()
 HOST = '127.0.0.1'
 PORT = 3000
 
@@ -9,18 +10,23 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
     data = 0
     data = conn.recv(1024)
     if data == b'': return
-    request = HTTP(data.decode())
+    try: request = HTTP(data.decode())
+    except: 
+        conn.close()
+        return
     response = HTTP(None)
     print(f"Request from {addr[0]}:{addr[1]}:", ' '.join(request.Headers))
-    if request.Headers[2] != "HTTP/1.0":
+    if request.Headers[2] not in ["HTTP/1.0", "HTTP/1.1"]:
         response.StatusCode(505)
     elif request.Headers[0] == "GET" or request.Headers[0] == "HEAD":
         path = Path(request.Headers[1][1:])
-        print(path.as_posix())
         if path.as_posix() == '.':
             response.StatusCode(200)
             response.Content_Type = "text/html"
             path = Path('index.html')
+        elif len(path.absolute().as_posix()) < len(CWD) or path.absolute().as_posix()[:len(CWD)] != CWD:
+            response.StatusCode(403)
+            response.Content_Type = "text/html"
         elif Path(path).exists():
             response.StatusCode(200)
             match Path(path).suffix:
@@ -77,7 +83,7 @@ def Handle_Connection(server: socket.socket) -> None:
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((HOST, PORT))
 server.listen(1)
-print(f"Listening on {HOST}:{PORT}..")
+print(f"Listening on {HOST}:{PORT} in {CWD}..")
 try: 
     while True: Handle_Connection(server)
 except: server.close()
