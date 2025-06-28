@@ -24,8 +24,8 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             response.StatusCode(200)
             response.Content_Type = "text/html"
             path = Path('index.html')
-        elif len(path.absolute().as_posix()) < len(CWD) or path.absolute().as_posix()[:len(CWD)] != CWD:
-            response.StatusCode(403)
+        elif len(path.absolute().as_posix()) < len(CWD) or path.absolute().as_posix()[:len(CWD)] != CWD or '..' in path.as_posix():
+            response.StatusCode(400)
             response.Content_Type = "text/html"
         elif Path(path).exists():
             response.StatusCode(200)
