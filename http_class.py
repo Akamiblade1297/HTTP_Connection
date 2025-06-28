@@ -4,9 +4,11 @@ import pytz
 CODES = {
         200: "OK",
         204: "No Content",
+        400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
         405: "Not Allowed",
+        414: "URI Too Long",
         505: "HTTP Version Not Supported",
 }
 
@@ -51,7 +53,10 @@ class HTTP:
             if i != "Headers" and i != "Body":
                 raw_lines.append(f"{i.replace('_','-')}: {self.__dict__[i]}")
         raw_lines.append('')
-        raw_lines.append(self.Body)
+        if type(self.Body) == str:
+            raw_lines.append(self.Body)
+        else:
+            raw_lines.append("Binary Data")
 
         raw = '\r\n'.join(raw_lines)
         return raw
