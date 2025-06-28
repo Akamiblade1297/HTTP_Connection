@@ -1,9 +1,10 @@
 import socket
 import errno
+import os
+from datetime import datetime, timezone
 import gzip, zlib, brotli
 from pathlib import Path
-from http_class import HTTP
-CWD = Path('.').resolve().as_posix()
+from http_class import HTTP, DATEFORMAT, CWD
 HOST = '127.0.0.1'
 PORT = 3000
 ENCODING = [
@@ -11,6 +12,12 @@ ENCODING = [
         "deflate",
         "br",
         ]
+
+def GetModifiedTime(path: Path) -> datetime:
+    return datetime.fromtimestamp(os.path.getmtime(path.as_posix())).astimezone(timezone.utc).replace(microsecond=0)
+
+def TimeFromString(string: str) -> datetime:
+    return datetime.strptime(string, DATEFORMAT).replace(tzinfo=timezone.utc)
 
 def Handle_Request(conn: socket.socket, addr: tuple) -> None:
     conn.settimeout(5)
@@ -22,7 +29,6 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             response = HTTP(None)
             response.StatusCode(400)
             response.Connection = "Close"
-            response.Content_Type = "text/html"
             conn.send(response.RawBytes())
             conn.close()
             break
@@ -38,7 +44,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                 response.StatusCode(200)
                 response.Content_Type = "text/html"
                 path = Path('index.html')
-            elif not path.resolve().as_posix().startswith(CWD + '/'): # Helding Directory Traversal
+            elif not path.resolve().as_posix().startswith(CWD): # Helding Directory Traversal
                 response.StatusCode(400)
                 response.Content_Type = "text/html"
             elif Path(path).exists():
@@ -61,22 +67,36 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             else:
                 response.StatusCode(404)
                 response.Content_Type = "text/html"
-                if request.Headers[0] == "GET":
-                    response.Body = Path('ErrorPages/404.html').read_text()
-                    response.CalculateLength()
             if request.Headers[0] == "GET":
                 match response.Headers[1]:
                     case "200":
-                        match response.Content_Type.split('/')[0]:
-                            case "text":
-                                response.Body = path.read_text()
-                                response.CalculateLength()
-                            case "image":
-                                response.Body = path.read_bytes()
-                                response.CalculateLength()
+                        if hasattr(request, "If_None_Match"):
+                            if response.GetETag(path) != request.If_None_Match:
+                                response.GetBody(path)
+                            else:
+                                response.StatusCode(304)
+                        elif hasattr(request, "If_Match"):
+                            if response.GetETag(path) == request.If_Match:
+                                response.GetBody(path)
+                            else:
+                                response.StatusCode(412)
+                        elif hasattr(request, "If_Modified_Since"):
+                            if TimeFromString(request.If_Modified_Since) >= GetModifiedTime(path):
+                                response.GetBody(path)
+                            else:
+                                response.StatusCode(304)
+                        elif hasattr(request, "If_Unmodified_Since"):
+                            if TimeFromString(request.If_Unmodified_Since) >= GetModifiedTime(path):
+                                response.GetBody(path)
+                            else:
+                                response.StatusCode(412)
+                        else:
+                            response.GetBody(path)
                     case "403":
-                        response.Body = Path('ErrorPages/403.html').read_text()
-                        response.CalculateLength()
+                        response.GetBody(Path('ErrorPages/403.html'))
+                    case "404":
+                        response.GetBody(Path('ErrorPages/404.html'))
+
         elif request.Headers[0] == "OPTIONS":
             response.StatusCode(204)
             response.Allow = "GET, HEAD, OPTIONS"
@@ -89,6 +109,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
         if request.Headers[2] == "HTTP/1.0":
             conn.send(response.RawBytes())
             conn.close()
+            print("Connection closed")
             return
         else:
             if len(response.Body) > 128 and hasattr(request, 'Accept_Encoding'):
@@ -139,6 +160,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                 response.Connection = "Close"
                 conn.send(response.RawBytes())
                 conn.close()
+                print("Connection closed")
                 return
 
 def Handle_Connection(server: socket.socket) -> None:
@@ -151,7 +173,6 @@ def Handle_Connection(server: socket.socket) -> None:
         if e.errno == errno.ENAMETOOLONG:
             response = HTTP(None)
             response.StatusCode(414)
-            response.Content_Type = "text/html"
             response.Connection = "Close"
             conn.send(response.RawBytes())
     except Exception as err:
