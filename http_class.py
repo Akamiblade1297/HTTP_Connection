@@ -28,7 +28,7 @@ class HTTP:
             raw_lines.pop(0)
             self.Body = '\r\n'.join(raw_lines)
         else:
-            self.Headers        =   ["HTTP/1.0", "", ""]
+            self.Headers        =   ["HTTP/1.1", "", ""]
             self.Content_Type   =   "text/html"
             self.Date           =    datetime.datetime.now().astimezone(pytz.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
             self.X_Powered_By   =   "A97 the Cube"
