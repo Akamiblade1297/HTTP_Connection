@@ -44,8 +44,12 @@ class HTTP:
         else:
             self.Headers        =   ["HTTP/1.1", "", ""]
             self.Date           =   datetime.now(timezone.utc).strftime(DATEFORMAT)
-            self.Connection     =   "Keep-Alive"
+            self.Connection     =   "keep-alive"
+            self.Keep_Alive     =   ""
+            self.Cache_Control  =   "public, max-age=86400"
             self.X_Powered_By   =   "A97 the Cube"
+            self.Content_Type   =   ""
+            self.Content_Length =   ""
             self.Body           =   ""
 
     def CalculateLength(self) -> None:
@@ -101,13 +105,13 @@ class HTTP:
     def Raw(self) -> str:
         raw_lines = [' '.join(self.Headers)]
         for i in self.__dict__.keys():
-            if i != "Headers" and i != "Body":
+            if not ( i == "Headers" or i == "Body" or self.__dict__[i] == "" ):
                 raw_lines.append(f"{i.replace('_','-')}: {self.__dict__[i]}")
         raw_lines.append('')
         if type(self.Body) == str:
             raw_lines.append(self.Body)
-        else:
-            raw_lines.append("Binary Data")
+        elif len(self.Body) > 0:
+            raw_lines.append(f"[{self.Content_Length} Bytes of data]")
 
         raw = '\r\n'.join(raw_lines)
         return raw
@@ -115,7 +119,7 @@ class HTTP:
     def RawBytes(self) -> bytes:
         raw_lines = [' '.join(self.Headers)]
         for i in self.__dict__.keys():
-            if i != "Headers" and i != "Body":
+            if not ( i == "Headers" or i == "Body" or self.__dict__[i] == "" ):
                 raw_lines.append(f"{i.replace('_','-')}: {self.__dict__[i]}")
         raw_lines.append('')
         raw = '\r\n'.join(raw_lines)

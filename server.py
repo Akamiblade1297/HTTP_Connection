@@ -12,6 +12,8 @@ ENCODING = [
         "deflate",
         "br",
         ]
+LOGS = Path(f"logs/{datetime.strftime(datetime.now(),'%Y-%m-%d_%H:%M:%S')}")
+LOGS.touch()
 
 def GetModifiedTime(path: Path) -> datetime:
     return datetime.fromtimestamp(os.path.getmtime(path.as_posix())).astimezone(timezone.utc).replace(microsecond=0)
@@ -34,6 +36,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             break
         response = HTTP(None)
         print(f"Request from {addr[0]}:{addr[1]}:", ' '.join(request.Headers))
+        LOGS.write_text(LOGS.read_text() + f"Request from {addr[0]}:{addr[1]}:\n---\n" + request.Raw()+'---\n\n')
 
         # Processing Method request
         if request.Headers[2] not in ["HTTP/1.0", "HTTP/1.1"]:
@@ -110,7 +113,6 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             conn.send(response.RawBytes())
             conn.close()
             print("Connection closed")
-            return
         else:
             if len(response.Body) > 128 and hasattr(request, 'Accept_Encoding'):
                 Accepted = request.Accept_Encoding.split(', ')
@@ -156,12 +158,15 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                 response.Connection = "Keep-Alive"
                 response.Keep_Alive = "timeout=5" 
                 conn.send(response.RawBytes())
+                LOGS.write_text(LOGS.read_text() + f"Response for {addr[0]}:{addr[1]}:\n---\n" + response.Raw()+'\n---\n\n')
+                continue
             else:
                 response.Connection = "Close"
                 conn.send(response.RawBytes())
                 conn.close()
                 print("Connection closed")
-                return
+        LOGS.write_text(LOGS.read_text() + f"Response for {addr[0]}:{addr[1]}:\n---\n" + response.Raw()+'\n---\n\n')
+        return
 
 def Handle_Connection(server: socket.socket) -> None:
     conn, addr = server.accept()

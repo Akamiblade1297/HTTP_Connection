@@ -1,0 +1,171 @@
+Request from 127.0.0.1:33952:
+---
+GET / HTTP/1.1
+Host: 127.0.0.1:3000
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-GPC: 1
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: none
+Sec-Fetch-User: ?1
+DNT: 1
+Priority: u=0, i
+
+---
+
+Response for 127.0.0.1:33952:
+---
+HTTP/1.1 200 OK
+Date: Sun, 29 Jun 2025 07:27:55 UTC
+Connection: Keep-Alive
+Keep-Alive: timeout=5
+Cache-Control: public, max-age=86400
+X-Powered-By: A97 the Cube
+Content-Type: text/html
+Content-Length: 176
+ETag: dd478599b51210df22fbee89f947cf0b39b8d6e3
+Content-Encoding: gzip
+
+[176 Bytes of data]
+---
+
+Request from 127.0.0.1:33952:
+---
+GET /style.css HTTP/1.1
+Host: 127.0.0.1:3000
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0
+Accept: text/css,*/*;q=0.1
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-GPC: 1
+Connection: keep-alive
+Referer: http://127.0.0.1:3000/
+Sec-Fetch-Dest: style
+Sec-Fetch-Mode: no-cors
+Sec-Fetch-Site: same-origin
+DNT: 1
+Priority: u=2
+
+---
+
+Response for 127.0.0.1:33952:
+---
+HTTP/1.1 200 OK
+Date: Sun, 29 Jun 2025 07:27:55 UTC
+Connection: Keep-Alive
+Keep-Alive: timeout=5
+Cache-Control: public, max-age=86400
+X-Powered-By: A97 the Cube
+Content-Type: text/css
+Content-Length: 108
+ETag: 597e65f9f37f103f347e6b1a9cc04b621fabae3e
+
+[108 Bytes of data]
+---
+
+Request from 127.0.0.1:33952:
+---
+GET /favicon.ico HTTP/1.1
+Host: 127.0.0.1:3000
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0
+Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-GPC: 1
+Connection: keep-alive
+Referer: http://127.0.0.1:3000/
+Sec-Fetch-Dest: image
+Sec-Fetch-Mode: no-cors
+Sec-Fetch-Site: same-origin
+DNT: 1
+Priority: u=6
+
+---
+
+Response for 127.0.0.1:33952:
+---
+HTTP/1.1 200 OK
+Date: Sun, 29 Jun 2025 07:27:55 UTC
+Connection: Keep-Alive
+Keep-Alive: timeout=5
+Cache-Control: public, max-age=86400
+X-Powered-By: A97 the Cube
+Content-Type: image/x-icon
+Content-Length: 68791
+ETag: 7730246d3621900b3e3a2a602e02788ce87dfab1
+Content-Encoding: gzip
+
+[68791 Bytes of data]
+---
+
+Request from 127.0.0.1:50602:
+---
+GET / HTTP/1.1
+Host: 127.0.0.1:3000
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-GPC: 1
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: none
+Sec-Fetch-User: ?1
+DNT: 1
+If-None-Match: dd478599b51210df22fbee89f947cf0b39b8d6e3
+Priority: u=0, i
+
+---
+
+Response for 127.0.0.1:50602:
+---
+HTTP/1.1 304 Not Modified
+Date: Sun, 29 Jun 2025 07:28:03 UTC
+Connection: Keep-Alive
+Keep-Alive: timeout=5
+Cache-Control: public, max-age=86400
+X-Powered-By: A97 the Cube
+Content-Type: text/html
+
+---
+
+Request from 127.0.0.1:50614:
+---
+GET / HTTP/1.1
+Host: 127.0.0.1:3000
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-GPC: 1
+Connection: keep-alive
+Upgrade-Insecure-Requests: 1
+Sec-Fetch-Dest: document
+Sec-Fetch-Mode: navigate
+Sec-Fetch-Site: none
+Sec-Fetch-User: ?1
+DNT: 1
+If-None-Match: dd478599b51210df22fbee89f947cf0b39b8d6e3
+Priority: u=0, i
+
+---
+
+Response for 127.0.0.1:50614:
+---
+HTTP/1.1 304 Not Modified
+Date: Sun, 29 Jun 2025 07:28:09 UTC
+Connection: Keep-Alive
+Keep-Alive: timeout=5
+Cache-Control: public, max-age=86400
+X-Powered-By: A97 the Cube
+Content-Type: text/html
+
+---
+
