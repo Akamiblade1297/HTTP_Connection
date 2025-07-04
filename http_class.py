@@ -23,7 +23,9 @@ ETagDB.touch()
 
 class HTTP:
     def __init__(self, raw: str|None = None) -> None:
-        self.Headers = {}
+        self.StartLine: list = []
+        self.Headers:   dict = {}
+        self.Body:     bytes = b""
         if type(raw) == str:
             raw_lines = raw.replace('\r','').split('\n')
 
@@ -39,10 +41,9 @@ class HTTP:
                 keyNval = raw_lines[0].split(': ')
 
             raw_lines.pop(0)
-            self.Body = '\r\n'.join(raw_lines)
+            self.Body = '\r\n'.join(raw_lines).encode()
         else:
             self.StartLine = ["HTTP/1.1", "", ""]
-            self.Body = ""
 
             self.SetHeader(  "Date"             ,   datetime.now(timezone.utc).strftime(DATEFORMAT)  )
             self.SetHeader(  "Connection"       ,   "keep-alive"                                     )
@@ -53,7 +54,7 @@ class HTTP:
             self.SetHeader(  "Content-Length"   ,   ""                                               )
 
     def CalculateLength(self) -> None:
-        self.SetHeader("Content-Length", str(len(self.Body)))
+        self.SetHeader("Content-Length", str(len( self.Body )))
 
     def SetHeader(self, header: str, value: str) -> None:
         self.Headers[header] = value
@@ -78,7 +79,6 @@ class HTTP:
         # ETags database contains ETags in format '<Relative path to file> <Last Modified Time> <ETag>'
         etags = ETagDB.read_text().split('\n')
         relpath = path.as_posix().replace(CWD, '') 
-        print(relpath)
         modtime = str(os.path.getmtime(path.as_posix()))
         for i in range(len(etags)): 
             info = etags[i].split(' ')
@@ -98,17 +98,23 @@ class HTTP:
         ETagDB.write_text('\n'.join(etags))
         return newETag
 
-    def GetBody(self, path: Path) -> None:
+    def SetBody(self, body: str|bytes) -> None:
+        if type(body) == str:
+            self.Body = body.encode()
+        elif type(body) == bytes:
+            self.Body = body
+        else:
+            raise TypeError(f"Can't assing Body of type '{type(body)}' to HTTP Body")
+
+    def GetBody(self, path: Path, ranges: str = '') -> None:
         if self.GetHeader("Content-Type") == "":
             raise AttributeError("Can't assign body from file. Can't get file MIME Type")
-        match self.GetHeader("Content-Type").split('/')[0]:
-            case "text":
-                self.Body = path.read_text()
-            case "image" | "audio":
-                self.Body = path.read_bytes()
-            case _:
-                raise AttributeError("Can't assign body from file. File HIME Type not supported")
+
+        self.SetBody(path.read_bytes())
         self.SetHeader("ETag", self.GetETag(path))
+
+        # if ranges != '':
+
         self.CalculateLength()
 
     def Raw(self) -> str:
