@@ -46,11 +46,6 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             try: request = HTTP(data.decode())
             except:
                 print(f"Got non-HTTP request: {data}")
-                response = HTTP(None)
-                response.StatusCode(400)
-                response.SetHeader("Connection", "Close")
-                conn.send(response.RawBytes())
-                conn.close()
                 break
             response = HTTP(None)
             print(f"Request from {addr[0]}:{addr[1]}:", ' '.join(request.StartLine))
@@ -71,7 +66,11 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                     response.StatusCode(200)
                     response.SetHeader("Content-Type", "audio/mpeg")
                     response.SetHeader("Content-Disposition", "attachment")
-                elif not path.resolve().as_posix().startswith(CWD): # Helding Directory Traversal
+                elif path.as_posix() == 'Web/Wordle':
+                    response.StatusCode(200)
+                    response.SetHeader("Content-Type", "text/html")
+                    path = Path('Web/wordle.html')
+                elif not path.resolve().as_posix().startswith(f"{CWD}Web/"): # Helding Directory Traversal
                     response.StatusCode(400)
                     response.SetHeader("Content-Type", "text/html")
                 elif Path(path).exists():
@@ -136,7 +135,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             if request.StartLine[2] == "HTTP/1.0":
                 conn.send(response.RawBytes())
                 conn.close()
-                print("Connection closed with {add[0]}:{addr[1]}")
+                print(f"Connection closed with {addr[0]}:{addr[1]}")
             else:
                 if len(response.Body) > 128 and request.GetHeader('Accept-Encoding') != '':
                     if len(response.Body) > 128 and request.GetHeader('Accept-Encoding') != '':
@@ -167,12 +166,12 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                     response.SetHeader("Connection", "close")
                     conn.send(response.RawBytes())
                     conn.close()
-                    print(f"Connection closed with {add[0]}:{addr[1]}")
+                    print(f"Connection closed with {addr[0]}:{addr[1]}")
             LOGS.write_text(LOGS.read_text() + f"Response for {addr[0]}:{addr[1]}:\n---\n" + response.Raw()+'\n---\n\n')
             return
 
     except TimeoutError:
-        print("Connection closed with {addr[0]}:{addr[1]} via timeout")
+        print(f"Connection closed with {addr[0]}:{addr[1]} via timeout")
     except OSError as e:
         if e.errno == errno.ENAMETOOLONG:
             response = HTTP(None)
