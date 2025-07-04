@@ -42,12 +42,13 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
         if request.StartLine[2] not in ["HTTP/1.0", "HTTP/1.1"]:
             response.StatusCode(505)
         elif request.StartLine[0] == "GET" or request.StartLine[0] == "HEAD":
-            path = Path(request.StartLine[1][1:])
-            if path.as_posix() == '.':
+            path = Path(f"./Web/{request.StartLine[1][1:]}")
+            print(path)
+            if path.as_posix() == 'Web':
                 response.StatusCode(200)
                 response.SetHeader("Content-Type", "text/html")
-                path = Path('index.html')
-            elif path.as_posix() == 'music.mp3':
+                path = Path('Web/index.html')
+            elif path.as_posix() == 'Web/music.mp3':
                 response.StatusCode(200)
                 response.SetHeader("Content-Type", "audio/mpeg")
                 response.SetHeader("Content-Disposition", "attachment")
