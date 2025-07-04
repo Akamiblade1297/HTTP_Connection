@@ -96,28 +96,28 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                 if request.StartLine[0] == "GET":
                     match response.StartLine[1]:
                         case "200":
-                            if hasattr(request, "If-None-Match"):
+                            if request.GetHeader("If-None-Match") != '':
                                 if response.GetETag(path) != request.GetHeader("If-None-Match"):
-                                    response.GetBody(path)
+                                    response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(304)
-                            elif hasattr(request, "If-Match"):
+                            elif request.GetHeader("If-Match") != '':
                                 if response.GetETag(path) == request.GetHeader("If-Match"):
-                                    response.GetBody(path)
+                                    response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(412)
-                            elif hasattr(request, "If-Modified-Since"):
+                            elif request.GetHeader("If-Modified-Since") != '':
                                 if TimeFromString(request.GetHeader("If-Modified-Since")) >= GetModifiedTime(path):
-                                    response.GetBody(path)
+                                    response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(304)
-                            elif hasattr(request, "If-Unmodified-Since"):
+                            elif request.GetHeader("If-Unmodified-Since") != '':
                                 if TimeFromString(request.GetHeader("If-Unmodified-Since")) >= GetModifiedTime(path):
-                                    response.GetBody(path)
+                                    response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(412)
                             else:
-                                response.GetBody(path)
+                                response.GetBody(path, request.GetHeader("Range"))
                         case "403":
                             response.GetBody(Path('ErrorPages/403.html'))
                         case "404":

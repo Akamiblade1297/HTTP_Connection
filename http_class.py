@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import hashlib
+import random, string
 from datetime import datetime, timezone
 sha1 = hashlib.sha1()
 
@@ -9,7 +10,9 @@ DATEFORMAT = "%a, %d %b %Y %H:%M:%S %Z"
 CODES = {
         200: "OK",
         204: "No Content",
-        304: "Not Modified", 400: "Bad Request",
+        206: "Partial Content",
+        304: "Not Modified",
+        400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
         405: "Not Allowed",
@@ -17,6 +20,7 @@ CODES = {
         414: "URI Too Long",
         505: "HTTP Version Not Supported",
 }
+BOUNDARY = "SuperSigma=CubicBoundary97"
 
 ETagDB = Path('.ETags')
 ETagDB.touch()
@@ -31,7 +35,7 @@ class HTTP:
 
             self.StartLine = raw_lines[0].split(' ')
             if len(self.StartLine) != 3:
-                raise TypeError("Not valid HTTP Request")
+                raise ValueError("Not valid HTTP Request")
             raw_lines.pop(0)
 
             keyNval = raw_lines[0].split(': ')
@@ -50,7 +54,9 @@ class HTTP:
             self.SetHeader(  "Keep-Alive"       ,   ""                                               )
             self.SetHeader(  "Cache-Control"    ,   "public, max-age=86400"                          )
             self.SetHeader(  "X-Powered-By"     ,   "A97 the Cube"                                   )
+            self.SetHeader(  "Accept-Ranges"    ,   "bytes"                                          )
             self.SetHeader(  "Content-Type"     ,   ""                                               )
+            self.SetHeader(  "Content-Range"    ,   ""                                               )
             self.SetHeader(  "Content-Length"   ,   ""                                               )
 
     def CalculateLength(self) -> None:
@@ -98,6 +104,22 @@ class HTTP:
         ETagDB.write_text('\n'.join(etags))
         return newETag
 
+    def GetRange(self, body: bytes, rng: list[str]) -> bytes:
+        if len(rng) != 2:
+            raise ValueError("Invalid range given")
+        try:
+            i_rng = list(map(int, rng))
+            return body[ i_rng[0] : i_rng[1] ] 
+        except ValueError as e:
+            if rng[0] == '' and rng[1] == '':
+                raise ValueError("Invalid range given")
+            elif rng[0] == '':
+                return body[             : int(rng[1]) ]
+            elif rng[1] == '':
+                return body[ int(rng[0]) :             ]
+            else:
+                raise e
+
     def SetBody(self, body: str|bytes) -> None:
         if type(body) == str:
             self.Body = body.encode()
@@ -106,14 +128,34 @@ class HTTP:
         else:
             raise TypeError(f"Can't assing Body of type '{type(body)}' to HTTP Body")
 
-    def GetBody(self, path: Path, ranges: str = '') -> None:
-        if self.GetHeader("Content-Type") == "":
-            raise AttributeError("Can't assign body from file. Can't get file MIME Type")
-
-        self.SetBody(path.read_bytes())
+    def GetBody(self, path: Path, ranges_header: str = '', boundary: str = BOUNDARY) -> None:
+        print(ranges_header)
+        body = path.read_bytes()
         self.SetHeader("ETag", self.GetETag(path))
 
-        # if ranges != '':
+        if ranges_header != '' and ranges_header.split('=')[0] == 'bytes':
+            self.StatusCode(206)
+            ranges = ranges_header.split('=')[1].split(',')
+            print(ranges)
+            if len(ranges) == 1:
+                rng = ranges[0].split('-')
+                self.SetHeader("Content-Range", f"bytes {ranges[0]}/{len(body)}")
+                self.SetBody(self.GetRange(body, rng))
+            else:
+                filetype = self.GetHeader("Content-Type")
+                self.SetHeader("Content-Type", f"multipart/byteranges; boundary={boundary}")
+                rangesBody = b""
+                separator = f"--{boundary}\r\n"
+                endline = f"--{boundary}--"
+                
+                for rng in ranges:
+                    rng = rng.split('-')
+                    rangeHeaders = f"{separator}Content-Type: {filetype}\r\nContent-Range: bytes {'-'.join(rng)}/{len(body)}\r\n\r\n"
+                    rangesBody += rangeHeaders.encode() + self.GetRange(body, rng) + b"\r\n"
+                rangesBody += endline.encode()
+                self.SetBody(rangesBody)
+        else:
+            self.SetBody(body)
 
         self.CalculateLength()
 
@@ -123,8 +165,8 @@ class HTTP:
             if self.GetHeader(i) != "":
                 raw_lines.append(f"{i}: {self.GetHeader(i)}")
         raw_lines.append('')
-        if type(self.Body) == str:
-            raw_lines.append(self.Body)
+        if self.GetHeader("Content-Type").split('/')[0] == 'text':
+            raw_lines.append(self.Body.decode())
         elif len(self.Body) > 0:
             raw_lines.append(f"[{self.GetHeader('Content-Length')} Bytes of data]")
 
@@ -148,9 +190,9 @@ if __name__ == "__main__":
     a = HTTP("""GET / HTTP/1.1\r\nAccept-Encoding: gzip, deflate, zstd\r\nAccept: */*\r\nConnection: keep-alive\r\nUser-Agent: CubicHTTP/1.0\r\nHost: localhost:3000\r\n\r\n""")
     print(a.Raw())
     b = HTTP(None)
-    b.SetHeader("Connection", "Keep-Alive")
+    b.SetHeader("Connection", "keep-alive")
     b.SetHeader("Keep-Alive", "timeout=5")
-    b.Body = "Hello, from server!\r\n"
+    b.SetBody("Hello, from server!\r\n")
     b.CalculateLength()
     b.StatusCode(200)
     print(b.Raw())
