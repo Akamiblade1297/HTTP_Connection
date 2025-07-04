@@ -1,12 +1,15 @@
 import socket
 import errno
 import os
+import time
 from datetime import datetime, timezone
 import gzip, zlib, brotli
 from pathlib import Path
 from http_class import HTTP, DATEFORMAT, CWD
 HOST = '127.0.0.1'
 PORT = 3000
+CHUNK_SIZE = 65536
+CHUNK_DELAY = 0.01
 ENCODING = [
         "gzip",
         "deflate",
@@ -20,6 +23,19 @@ def GetModifiedTime(path: Path) -> datetime:
 
 def TimeFromString(string: str) -> datetime:
     return datetime.strptime(string, DATEFORMAT).replace(tzinfo=timezone.utc)
+
+def SendResponse(conn: socket.socket, response: HTTP) -> None:
+    if len(response.Body) > CHUNK_SIZE:
+        print("Response body is large. Sending it in Chunks.")
+        Body = response.Body
+        response.Body = ''
+        conn.send(response.RawBytes())
+        if type(Body) == str: Body = Body.encode()
+        for i in range(0, len(Body), CHUNK_SIZE):
+            conn.send( Body[ i : i + CHUNK_SIZE] )
+            time.sleep(CHUNK_DELAY)
+    else:
+        conn.send(response.RawBytes())
 
 def Handle_Request(conn: socket.socket, addr: tuple) -> None:
     conn.settimeout(5)
@@ -39,7 +55,9 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
         LOGS.write_text(LOGS.read_text() + f"Request from {addr[0]}:{addr[1]}:\n---\n" + request.Raw()+'---\n\n')
 
         # Processing Method request
-        if request.StartLine[2] not in ["HTTP/1.0", "HTTP/1.1"]:
+        if request.StartLine[2].split('/')[0] != "HTTP":
+            response.StatusCode(400)
+        elif request.StartLine[2].split('/')[1] not in ["1.0", "1.1"]:
             response.StatusCode(505)
         elif request.StartLine[0] == "GET" or request.StartLine[0] == "HEAD":
             path = Path(f"./Web/{request.StartLine[1][1:]}")
@@ -141,7 +159,7 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
             if request.GetHeader("Connection").lower() in [ 'keep-alive', '' ]:
                 response.SetHeader("Connection", "keep-alive")
                 response.SetHeader("Keep-Alive", "timeout=5")
-                conn.send(response.RawBytes())
+                SendResponse(conn, response)
                 LOGS.write_text(LOGS.read_text() + f"Response for {addr[0]}:{addr[1]}:\n---\n" + response.Raw()+'\n---\n\n')
                 continue
             else:
