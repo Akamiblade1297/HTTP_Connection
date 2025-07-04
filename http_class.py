@@ -9,8 +9,7 @@ DATEFORMAT = "%a, %d %b %Y %H:%M:%S %Z"
 CODES = {
         200: "OK",
         204: "No Content",
-        304: "Not Modified",
-        400: "Bad Request",
+        304: "Not Modified", 400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
         405: "Not Allowed",
@@ -23,41 +22,51 @@ ETagDB = Path('.ETags')
 ETagDB.touch()
 
 class HTTP:
-    def __init__(self, raw: str|None) -> None:
+    def __init__(self, raw: str|None = None) -> None:
+        self.Headers = {}
         if type(raw) == str:
             raw_lines = raw.replace('\r','').split('\n')
 
-            self.Headers = raw_lines[0].split(' ')
-            if len(self.Headers) != 3:
+            self.StartLine = raw_lines[0].split(' ')
+            if len(self.StartLine) != 3:
                 raise TypeError("Not valid HTTP Request")
             raw_lines.pop(0)
 
-            keyNval = ['','']
-            while len(keyNval) != 1:
-                keyNval = raw_lines[0].split(': ')
-                try: self.__dict__[keyNval[0].replace('-','_')] = keyNval[1]
-                except: ''
+            keyNval = raw_lines[0].split(': ')
+            while len(keyNval) == 2:
+                self.SetHeader(keyNval[0], keyNval[1])
                 raw_lines.pop(0)
+                keyNval = raw_lines[0].split(': ')
 
             raw_lines.pop(0)
             self.Body = '\r\n'.join(raw_lines)
         else:
-            self.Headers        =   ["HTTP/1.1", "", ""]
-            self.Date           =   datetime.now(timezone.utc).strftime(DATEFORMAT)
-            self.Connection     =   "keep-alive"
-            self.Keep_Alive     =   ""
-            self.Cache_Control  =   "public, max-age=86400"
-            self.X_Powered_By   =   "A97 the Cube"
-            self.Content_Type   =   ""
-            self.Content_Length =   ""
-            self.Body           =   ""
+            self.StartLine = ["HTTP/1.1", "", ""]
+            self.Body = ""
+
+            self.SetHeader(  "Date"             ,   datetime.now(timezone.utc).strftime(DATEFORMAT)  )
+            self.SetHeader(  "Connection"       ,   "keep-alive"                                     )
+            self.SetHeader(  "Keep-Alive"       ,   ""                                               )
+            self.SetHeader(  "Cache-Control"    ,   "public, max-age=86400"                          )
+            self.SetHeader(  "X-Powered-By"     ,   "A97 the Cube"                                   )
+            self.SetHeader(  "Content-Type"     ,   ""                                               )
+            self.SetHeader(  "Content-Length"   ,   ""                                               )
 
     def CalculateLength(self) -> None:
-        self.Content_Length = str(len(self.Body))
+        self.SetHeader("Content-Length", str(len(self.Body)))
+
+    def SetHeader(self, header: str, value: str) -> None:
+        self.Headers[header] = value
+
+    def GetHeader(self, header: str) -> str:
+        try:
+            return self.Headers[header]
+        except:
+            return ""
 
     def StatusCode(self, code: int) -> None:
-        if self.Headers[0] == "HTTP/1.1":
-            self.Headers[1],self.Headers[2] = str(code),CODES[code]
+        if self.StartLine[0] == "HTTP/1.1":
+            self.StartLine[1],self.StartLine[2] = str(code),CODES[code]
         else:
             raise TypeError("Can't assign Status Code to HTTP Request. It's for Response only")
 
@@ -90,37 +99,37 @@ class HTTP:
         return newETag
 
     def GetBody(self, path: Path) -> None:
-        if not "Content_Type" in self.__dict__.keys():
+        if self.GetHeader("Content-Type") == "":
             raise AttributeError("Can't assign body from file. Can't get file MIME Type")
-        match self.Content_Type.split('/')[0]:
+        match self.GetHeader("Content-Type").split('/')[0]:
             case "text":
                 self.Body = path.read_text()
-            case "image":
+            case "image" | "audio":
                 self.Body = path.read_bytes()
             case _:
                 raise AttributeError("Can't assign body from file. File HIME Type not supported")
-        self.ETag = self.GetETag(path)
+        self.SetHeader("ETag", self.GetETag(path))
         self.CalculateLength()
 
     def Raw(self) -> str:
-        raw_lines = [' '.join(self.Headers)]
-        for i in self.__dict__.keys():
-            if not ( i == "Headers" or i == "Body" or self.__dict__[i] == "" ):
-                raw_lines.append(f"{i.replace('_','-')}: {self.__dict__[i]}")
+        raw_lines = [' '.join(self.StartLine)]
+        for i in self.Headers.keys():
+            if self.GetHeader(i) != "":
+                raw_lines.append(f"{i}: {self.GetHeader(i)}")
         raw_lines.append('')
         if type(self.Body) == str:
             raw_lines.append(self.Body)
         elif len(self.Body) > 0:
-            raw_lines.append(f"[{self.Content_Length} Bytes of data]")
+            raw_lines.append(f"[{self.GetHeader('Content-Length')} Bytes of data]")
 
         raw = '\r\n'.join(raw_lines)
         return raw
 
     def RawBytes(self) -> bytes:
-        raw_lines = [' '.join(self.Headers)]
-        for i in self.__dict__.keys():
-            if not ( i == "Headers" or i == "Body" or self.__dict__[i] == "" ):
-                raw_lines.append(f"{i.replace('_','-')}: {self.__dict__[i]}")
+        raw_lines = [' '.join(self.StartLine)]
+        for i in self.Headers.keys():
+            if self.GetHeader(i) != "":
+                raw_lines.append(f"{i}: {self.GetHeader(i)}")
         raw_lines.append('')
         raw = '\r\n'.join(raw_lines)
 
@@ -133,8 +142,8 @@ if __name__ == "__main__":
     a = HTTP("""GET / HTTP/1.1\r\nAccept-Encoding: gzip, deflate, zstd\r\nAccept: */*\r\nConnection: keep-alive\r\nUser-Agent: CubicHTTP/1.0\r\nHost: localhost:3000\r\n\r\n""")
     print(a.Raw())
     b = HTTP(None)
-    b.Connection = "Keep-Alive"
-    b.Keep_Alive = "timeout=5"
+    b.SetHeader("Connection", "Keep-Alive")
+    b.SetHeader("Keep-Alive", "timeout=5")
     b.Body = "Hello, from server!\r\n"
     b.CalculateLength()
     b.StatusCode(200)
