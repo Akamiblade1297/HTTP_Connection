@@ -1,7 +1,7 @@
+from enum import Enum
 from pathlib import Path
 import os
 import hashlib
-import random, string
 from datetime import datetime, timezone
 sha1 = hashlib.sha1()
 
@@ -186,13 +186,102 @@ class HTTP:
         raw_bytes += b"\r\n" + self.Body
         return raw_bytes
 
+    def __str__(self) -> str:
+        return self.Raw()
+
+class H2FrameType(Enum):
+    DATA            = 0x00
+    HEADERS         = 0x01
+    RST_STEAM       = 0x03
+    SETTINGS        = 0x04
+    PUSH_PROMISE    = 0x05
+    PING            = 0x06
+    GOAWAY          = 0x07
+    WINDOW_UPDATE   = 0x08
+    CONTINUATION    = 0x09
+
+class H2Settings(Enum):
+    HEADER_TABLE_SIZE                = 0x01
+    ENABLE_PUSH                      = 0x02
+    MAX_CONCURENT_STREAMS            = 0x03
+    INITIAL_WINDOW_SIZE              = 0x04
+    MAX_FRAME_SIZE                   = 0x05
+    MAX_HEADER_LIST_SIZE             = 0x06
+    SETTINGS_ENABLE_CONNECT_PROTOCOL = 0x08
+    SETTINGS_NO_RFC7540_PRIORITIES   = 0x09
+    TLS_RENEG_PERMITTED              = 0x10
+    SETTINGS_ENABLE_METADATA         = 0x4d44
+
+class H2ErrorCode(Enum):
+    NO_ERROR            = 0x00
+    PROTOCOL_ERROR      = 0x01
+    INTERNAL_ERROR      = 0x02
+    FLOW_CONTROL_ERROR  = 0x03
+    SETTINGS_TIMEOUT    = 0x04
+    STREAM_CLOSED       = 0x05
+    FRAME_SIZE_ERROR    = 0x06
+    REFUSED_STREAM      = 0x07
+    CANCEL              = 0x08
+    COMPRESSION_ERROR   = 0x09
+    CONNECT_ERROR       = 0x0A
+    ENHANCE_YOUR_CALM   = 0x0B
+    INADEQUATE_SECURITY = 0x0C
+    HTTP_1_1_REQUIRED   = 0x0D
+
+class H2Flag(Enum):
+    END_STREAM  = 0b00000001
+    ACK         = 0b00000001
+    END_HEADERS = 0b00000100
+    PADDED      = 0b00001000
+
+class HTTP2_Frame:
+    def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: list[H2Flag] = [], streamID: int = 0) -> None:
+        if raw != None:
+            self.Length   = int.from_bytes(raw[:3])
+            self.Type     = H2FrameType(raw[3])
+            self.Flags    = self.ParseFlags(raw[4])
+            self.StreamID = int.from_bytes(raw[5:9])
+            if H2Flag.PADDED in self.Flags:
+                self.Paddding = raw[9]
+                self.Payload = raw[9:-self.Paddding]
+            else:
+                self.Paddding = 0
+                self.Payload  = raw[9:]
+        else:
+            self.Length   = 0
+            self.Type     = h2type
+            self.Flags    = flags
+            self.StreamID = streamID
+            self.Padding  = 0
+            self.Payload  = b''
+
+    def CalculateLength(self) -> None:
+        self.Length = len(self.Payload)
+
+    def IsFinished(self) -> bool:
+        if len(self.Payload) == self.Length:
+            return True
+        elif len(self.Payload) < self.Length:
+            return False
+        else:
+            raise OverflowError("Payload length is larger then Length assigned in Header")
+
+    def Finish(self, raw: bytes) -> bool:
+        self.Payload += raw
+        return self.IsFinished()
+
+    def ParseFlags(self, flagsRaw: int) -> list[H2Flag]:
+        flags = []
+        for flag in H2Flag:
+            if flagsRaw & flag.value != 0:
+                flags.append(flag)
+        if H2Flag(1) in flags and self.Type not in [H2FrameType.HEADERS, H2FrameType.DATA, H2FrameType.CONTINUATION, H2FrameType.SETTINGS, H2FrameType.PING]:
+            raise ValueError(f"Unexpected ACK or END_STREAM flag for Frame type {self.Type}")
+        elif H2Flag.END_HEADERS in flags and self.Type not in [H2FrameType.HEADERS, H2FrameType.CONTINUATION]:
+            raise ValueError(f"Unexpected END_HEADERS flag for Frame type {self.Type}")
+        elif H2Flag.PADDED in flags and self.Type not in [H2FrameType.DATA, H2FrameType.HEADERS, H2FrameType.PUSH_PROMISE]:
+            raise ValueError(f"Unexpected PADDED flag for Frame type {self.Type}")
+        return flags
+
 if __name__ == "__main__":
-    a = HTTP("""GET / HTTP/1.1\r\nAccept-Encoding: gzip, deflate, zstd\r\nAccept: */*\r\nConnection: keep-alive\r\nUser-Agent: CubicHTTP/1.0\r\nHost: localhost:3000\r\n\r\n""")
-    print(a.Raw())
-    b = HTTP(None)
-    b.SetHeader("Connection", "keep-alive")
-    b.SetHeader("Keep-Alive", "timeout=5")
-    b.SetBody("Hello, from server!\r\n")
-    b.CalculateLength()
-    b.StatusCode(200)
-    print(b.Raw())
+    frame = HTTP2_Frame()

@@ -16,7 +16,7 @@ ENCODING = [
         "deflate",
         "br",
         ]
-LOGS = Path(f"logs/{datetime.strftime(datetime.now(),'%Y-%m-%d_%H:%M:%S')}")
+LOGS = Path(f"logs/{datetime.strftime(datetime.now(),'%d-%m-%Y_%H:%M:%S')}")
 LOGS.touch()
 
 def GetModifiedTime(path: Path) -> datetime:
