@@ -285,8 +285,14 @@ class HTTP2_Frame:
         elif H2Flag.PADDED in flags and self.Type not in [H2FrameType.DATA, H2FrameType.HEADERS, H2FrameType.PUSH_PROMISE]:
             raise ValueError(f"Unexpected PADDED flag for Frame type {self.Type}")
         return flags
+    
+    def RawFlags(self) -> int:
+        flagsRaw = 0
+        for flag in self.Flags:
+            flagsRaw += flag.value
+        return flagsRaw
 
-    def Raw(self) -> str:
+    def RawFormat(self) -> str:
         raw_lines = [ f"{self.Type.name}/{self.StreamID}" ]
         for flag in self.Flags:
             raw_lines.append(f"+{flag.name}")
@@ -300,6 +306,19 @@ class HTTP2_Frame:
         
         return '\n\t'.join(raw_lines)
 
+    def Raw(self) -> bytes:
+        frame = []
+        frame.append(self.Length.to_bytes(3))
+        frame.append(self.Type.value.to_bytes(1))
+        frame.append(self.RawFlags().to_bytes(1))
+        frame.append(self.StreamID.to_bytes(4))
+        if self.Padding != 0:
+            frame.append(self.Padding.to_bytes(1))
+        frame.append(self.Payload)
+        frame.append(bytes(self.Padding))
+
+        return b''.join(frame)
+
 if __name__ == "__main__":
     frame = HTTP2_Frame(
                 h2type=H2FrameType.HEADERS,
@@ -307,4 +326,6 @@ if __name__ == "__main__":
                 flags=[ H2Flag.END_HEADERS, H2Flag.END_STREAM ],
                 payload=b'\x82\x87\x84A\x0bexample.comS\ttext/htmlQ\x02ruz\x10CubicBrowser/9.7'
             )
+    print(frame.RawFormat())
+    print('---')
     print(frame.Raw())
