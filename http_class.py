@@ -2,7 +2,7 @@ from enum import Enum
 from pathlib import Path
 import os
 import hashlib
-from hpack import HPACK
+from hpack import HPACK, CompressionError
 from datetime import datetime, timezone
 sha1 = hashlib.sha1()
 
@@ -235,7 +235,7 @@ class H2Flag(Enum):
     PADDED      = 0b00001000
 
 class HTTP2_Frame:
-    def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: list[H2Flag]|int = [], streamID: int = 0) -> None:
+    def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: list[H2Flag]|int = [], streamID: int = 0, payload: bytes = b'', padding: int = 0) -> None:
         if raw != None:
             self.Length   = int.from_bytes(raw[:3])
             self.Type     = H2FrameType(raw[3])
@@ -252,8 +252,9 @@ class HTTP2_Frame:
             self.Type     = h2type
             self.Flags    = flags if type(flags) == list else self.ParseFlags(flags)
             self.StreamID = streamID
-            self.Padding  = 0
-            self.Payload  = b''
+            self.Padding  = padding
+            self.Payload  = payload
+            self.CalculateLength()
 
     def CalculateLength(self) -> None:
         self.Length = len(self.Payload)
@@ -285,5 +286,25 @@ class HTTP2_Frame:
             raise ValueError(f"Unexpected PADDED flag for Frame type {self.Type}")
         return flags
 
+    def Raw(self) -> str:
+        raw_lines = [ f"{self.Type.name}/{self.StreamID}" ]
+        for flag in self.Flags:
+            raw_lines.append(f"+{flag.name}")
+        
+        match self.Type:
+            case H2FrameType.HEADERS:
+                hpack = HPACK()
+                headers = hpack.DecodeHeaders(self.Payload)
+                for name, value in headers.items():
+                    raw_lines.append(f"{name} = {value}")
+        
+        return '\n\t'.join(raw_lines)
+
 if __name__ == "__main__":
-    frame = HTTP2_Frame()
+    frame = HTTP2_Frame(
+                h2type=H2FrameType.HEADERS,
+                streamID=1,
+                flags=[ H2Flag.END_HEADERS, H2Flag.END_STREAM ],
+                payload=b'\x82\x87\x84A\x0bexample.comS\ttext/htmlQ\x02ruz\x10CubicBrowser/9.7'
+            )
+    print(frame.Raw())

@@ -424,9 +424,9 @@ class HPACK:
             if j[0] == name and j[1] == value:
                 return b"\x02" + (i+61+1).to_bytes(1)
             elif j[0] == name and iname == -1:
-                iname = i
+                iname = i+61
         if iname != -1:
-            return b"\x01" + (iname+61+1).to_bytes(1)
+            return b"\x01" + (iname+1).to_bytes(1)
         else:
             return b"\x00\x00"
 
@@ -503,12 +503,12 @@ class HPACK:
         i = 0
         while i < len(enc):
             if HPACK.IsPrefixed(enc[i], '1'):
-                print('   1', hex(enc[i]))
+                # print('   1', hex(enc[i]))
                 index, i = HPACK.DecodePrefix(enc, i, '1')
                 name, value = self.GetHeader( index )
                 Headers[name] = value
             elif HPACK.IsPrefixed(enc[i], '01'):
-                print('  01', hex(enc[i]))
+                # print('  01', hex(enc[i]))
                 index, i = HPACK.DecodePrefix(enc, i, '01')
                 if index != 0:
                     name, _ = self.GetHeader( index )
@@ -542,7 +542,7 @@ class HPACK:
                     Headers[name] = value
                     self.IncrementTable(name, value)
             elif HPACK.IsPrefixed(enc[i], '0000'):
-                print('0000', hex(enc[i]))
+                # print('0000', hex(enc[i]))
                 if enc[i] != 0:
                     name, _ = self.GetHeader( enc[i] )
                     i+=1
@@ -586,9 +586,4 @@ class CompressionError(Exception):
 
 if __name__ == "__main__":
     hpack = HPACK()
-    while True:
-        enc_dump = input().replace(' ', '')
-        enc_num  = int(enc_dump,16)
-        enc      = enc_num.to_bytes(len(enc_dump)//2)
-        print(enc)
-        print(hpack.DecodeHeaders(enc))
+    print(hpack.EncodeHeaders({":method":"GET",":scheme":"https",":path":"/",":authority":"example.com","accept":"text/html","accept-language":"ru","user-agent":"CubicBrowser/9.7"}))
