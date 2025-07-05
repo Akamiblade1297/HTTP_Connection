@@ -2,6 +2,7 @@ from enum import Enum
 from pathlib import Path
 import os
 import hashlib
+from hpack import HPACK
 from datetime import datetime, timezone
 sha1 = hashlib.sha1()
 
@@ -23,69 +24,6 @@ CODES = {
 BOUNDARY = "SUper==SigMaCubicB04ndary97"
 ETagDB = Path('.ETags')
 ETagDB.touch()
-HPACK_STATIC_TABLE = (
-    [":authority", ""],
-    [":method", "GET"],
-    [":method", "POST"],
-    [":path", "/"],
-    [":path", "/index.html"],
-    [":scheme", "http"],
-    [":scheme", "https"],
-    [":status", "200"],
-    [":status", "204"],
-    [":status", "206"],
-    [":status", "304"],
-    [":status", "400"],
-    [":status", "404"],
-    [":status", "500"],
-    ["accept-charset", ""],
-    ["accept-encoding", "gzip, deflate"],
-    ["accept-language", ""],
-    ["accept-ranges", ""],
-    ["accept", ""],
-    ["access-control-allow-origin", ""],
-    ["age", ""],
-    ["allow", ""],
-    ["authorization", ""],
-    ["cache-control", ""],
-    ["content-disposition", ""],
-    ["content-encoding", ""],
-    ["content-language", ""],
-    ["content-length", ""],
-    ["content-location", ""],
-    ["content-range", ""],
-    ["content-type", ""],
-    ["cookie", ""],
-    ["date", ""],
-    ["etag", ""],
-    ["expect", ""],
-    ["expires", ""],
-    ["from", ""],
-    ["host", ""],
-    ["if-match", ""],
-    ["if-modified-since", ""],
-    ["if-none-match", ""],
-    ["if-range", ""],
-    ["if-unmodified-since", ""],
-    ["last-modified", ""],
-    ["link", ""],
-    ["location", ""],
-    ["max-forwards", ""],
-    ["proxy-authenticate", ""],
-    ["proxy-authorization", ""],
-    ["range", ""],
-    ["referer", ""],
-    ["refresh", ""],
-    ["retry-after", ""],
-    ["server", ""],
-    ["set-cookie", ""],
-    ["strict-transport-security", ""],
-    ["transfer-encoding", ""],
-    ["user-agent", ""],
-    ["vary", ""],
-    ["via", ""],
-    ["www-authenticate", ""]
-)
 
 class HTTP:
     def __init__(self, raw: str|None = None) -> None:
@@ -296,122 +234,6 @@ class H2Flag(Enum):
     END_HEADERS = 0b00000100
     PADDED      = 0b00001000
 
-class HPACK:
-    def __init__(self, maxSize: int = 4096) -> None:
-        self.Dynamic_Table = []
-        self.MaxSize       = maxSize
-        self.Size          = 0
-
-    def GetIndex(self, name: str, value: str) -> bytes:
-        iname = -1
-        for i, j in enumerate(HPACK_STATIC_TABLE):
-            if j[0] == name and j[1] == value:
-                return b"\x02" + (i+1).to_bytes(1)
-            elif j[0] == name and iname == -1:
-                iname = i
-        for i, j in enumerate(self.Dynamic_Table):
-            if j[0] == name and j[1] == value:
-                return b"\x02" + (i+61+1).to_bytes(1)
-            elif j[0] == name and iname == -1:
-                iname = i
-        if iname != -1:
-            return b"\x01" + (iname+61+1).to_bytes(1)
-        else:
-            return b"\x00\x00"
-
-    def GetHeader(self, index: int) -> list[str]:
-        return HPACK_STATIC_TABLE[index-1] if index <= 61 else self.Dynamic_Table[index-61-1]
-
-    def IncrementTable(self, name: str, value: str) -> None:
-        self.Dynamic_Table.append([name,value])
-        self.Size += len(name) + len(value) + 32
-
-    # Encoding
-    def IndexedHeader(self, index: int) -> bytes:
-        return (0x80 + index).to_bytes(1)
-    def Literal_NoIndexing_IndexedName(self, index: int, value: str) -> bytes:
-        return index.to_bytes(1) + len(value).to_bytes(1) + value.encode()
-    def Literal_NoIndexing_NewName(self, name: str, value: str) -> bytes:
-        return b'\x00' + len(name).to_bytes(1) + name.encode() + len(value).to_bytes(1) + value.encode()
-    def Literal_IncIndex_IndexedName(self, index: int, name: str, value: str) -> bytes:
-        self.IncrementTable(name, value)
-        return (0x40 + index).to_bytes(1) + len(value).to_bytes(1) + value.encode()
-    def Literal_IncIndex_NewName(self, name: str, value: str) -> bytes:
-        self.IncrementTable(name, value)
-        return b'\x40' + len(name).to_bytes(1) + name.encode() + len(value).to_bytes(1) + value.encode()
-
-    def Encode(self, headers: dict[str,str], incIndex: bool = True) -> bytes:
-        enc = b''
-        for name, value in headers.items():
-            index = self.GetIndex(name, value)
-            if index[0] == 2:
-                enc += self.IndexedHeader(index[1])
-            elif index[0] == 1:
-                if incIndex:
-                    enc += self.Literal_IncIndex_IndexedName(index[1], name, value)
-                else:
-                    enc += self.Literal_NoIndexing_IndexedName(index[1], value)
-            else:
-                if incIndex:
-                    enc += self.Literal_IncIndex_NewName(name, value)
-                else:
-                    enc += self.Literal_NoIndexing_NewName(name, value)
-        return enc
-
-    # Decoding
-    def Decode(self, enc: bytes) -> dict[str,str]:
-        Headers = {}
-        i = 0
-        while i < len(enc):
-            if enc[i] & 0x80 != 0:
-                name, value = self.GetHeader( enc[i] & ~0x80 )
-                Headers[name] = value
-                i+=1
-            elif enc[i] & 0x40 != 0:
-                if enc[i] & ~0x40 != 0:
-                    name, _ = self.GetHeader( enc[i] & ~0x40 )
-                    i+=1
-                    valLen = enc[i]
-                    i+=1
-                    value = enc[i:i+valLen].decode()
-                    i+=valLen
-                    Headers[name] = value
-                    self.IncrementTable(name, value)
-                else:
-                    i+=1
-                    nameLen = enc[i]
-                    i+=1
-                    name    = enc[i:i+nameLen].decode()
-                    i+=nameLen
-                    valLen  = enc[i]
-                    i+=1
-                    value   = enc[i:i+valLen].decode()
-                    i+=valLen
-                    Headers[name] = value
-                    self.IncrementTable(name, value)
-            else:
-                if enc[i] != 0:
-                    name, _ = self.GetHeader( enc[i] )
-                    i+=1
-                    valLen = enc[i]
-                    i+=1
-                    value = enc[i:i+valLen].decode()
-                    i+=valLen
-                    Headers[name] = value
-                else:
-                    i+=1
-                    nameLen = enc[i]
-                    i+=1
-                    name    = enc[i:i+nameLen].decode()
-                    i+=nameLen
-                    valLen  = enc[i]
-                    i+=1
-                    value   = enc[i:i+valLen].decode()
-                    i+=valLen
-                    Headers[name] = value
-
-        return Headers
-
 class HTTP2_Frame:
     def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: list[H2Flag]|int = [], streamID: int = 0) -> None:
         if raw != None:
@@ -464,9 +286,4 @@ class HTTP2_Frame:
         return flags
 
 if __name__ == "__main__":
-    hpack = HPACK()
-    Headers = b"\x82\x84\x41\x0elocalhost:3000\x86"
-    print(Headers)
-    Headers = hpack.Decode(Headers)
-    print(Headers)
-    print(hpack.Encode(Headers))
+    frame = HTTP2_Frame()
