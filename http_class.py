@@ -2,6 +2,7 @@ from enum import Enum
 from pathlib import Path
 import os
 import hashlib
+from posix import urandom
 from hpack import HPACK, CompressionError
 from datetime import datetime, timezone
 sha1 = hashlib.sha1()
@@ -189,6 +190,16 @@ class HTTP:
     def __str__(self) -> str:
         return self.Raw()
 
+class H2FrameNotFinished(Exception):
+    def __init__(self, message: str = "Unable to get unfinished Frame Raw") -> None:
+        self.message = message
+        super().__init__(message)
+
+class H2UnexpectedFlag(Exception):
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
 class H2FrameType(Enum):
     DATA            = 0x00
     HEADERS         = 0x01
@@ -230,9 +241,9 @@ class H2ErrorCode(Enum):
 
 class H2Flag(Enum):
     END_STREAM  = 0b00000001
-    ACK         = 0b00000001
     END_HEADERS = 0b00000100
     PADDED      = 0b00001000
+    ACK         = 0b10000000
 
 class HTTP2_Frame:
     def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: list[H2Flag]|int = [], streamID: int = 0, payload: bytes = b'', padding: int = 0) -> None:
@@ -262,7 +273,7 @@ class HTTP2_Frame:
             self.Length+=1
 
     def IsFinished(self) -> bool:
-        if len(self.Payload) == self.Length:
+        if len(self.Payload) + int(H2Flag.PADDED in self.Flags) == self.Length:
             return True
         elif len(self.Payload) < self.Length:
             return False
@@ -278,54 +289,196 @@ class HTTP2_Frame:
         for flag in H2Flag:
             if flagsRaw & flag.value != 0:
                 flags.append(flag)
-        if H2Flag(1) in flags and self.Type not in [H2FrameType.HEADERS, H2FrameType.DATA, H2FrameType.CONTINUATION, H2FrameType.SETTINGS, H2FrameType.PING]:
-            raise ValueError(f"Unexpected ACK or END_STREAM flag for Frame type {self.Type}")
-        elif H2Flag.END_HEADERS in flags and self.Type not in [H2FrameType.HEADERS, H2FrameType.CONTINUATION]:
-            raise ValueError(f"Unexpected END_HEADERS flag for Frame type {self.Type}")
+        if H2Flag(1) in flags: 
+            if self.Type in [H2FrameType.HEADERS, H2FrameType.DATA, H2FrameType.CONTINUATION]:
+                flags[flags.index(H2Flag(1))] = H2Flag.END_STREAM
+            elif self.Type in [H2FrameType.SETTINGS, H2FrameType.PING]:
+                flags[flags.index(H2Flag(1))] = H2Flag.ACK
+            else:
+                raise H2UnexpectedFlag(f"Unexpected ACK or END_STREAM flag for Frame type {self.Type}")
+        elif H2Flag.END_HEADERS in flags and self.Type not in [H2FrameType.HEADERS, H2FrameType.CONTINUATION, H2FrameType.PUSH_PROMISE]:
+            raise H2UnexpectedFlag(f"Unexpected END_HEADERS flag for Frame type {self.Type}")
         elif H2Flag.PADDED in flags and self.Type not in [H2FrameType.DATA, H2FrameType.HEADERS, H2FrameType.PUSH_PROMISE]:
-            raise ValueError(f"Unexpected PADDED flag for Frame type {self.Type}")
+            raise H2UnexpectedFlag(f"Unexpected PADDED flag for Frame type {self.Type}")
         return flags
     
     def RawFlags(self) -> int:
         flagsRaw = 0
         for flag in self.Flags:
-            flagsRaw += flag.value
+            flagsRaw += flag.value if flag != H2Flag.ACK else 1
         return flagsRaw
 
-    def RawFormat(self) -> str:
-        raw_lines = [ f"{self.Type.name}/{self.StreamID}" ]
-        for flag in self.Flags:
-            raw_lines.append(f"+{flag.name}")
-        
-        match self.Type:
-            case H2FrameType.HEADERS:
-                hpack = HPACK()
-                headers = hpack.DecodeHeaders(self.Payload)
-                for name, value in headers.items():
-                    raw_lines.append(f"{name} = {value}")
-        
-        return '\n\t'.join(raw_lines)
+    def RawFormat(self, hpack: HPACK = HPACK()) -> str:
+        if not self.IsFinished():
+            raise H2FrameNotFinished()
+        else:
+            raw_lines = [ f"{self.Type.name}/{self.StreamID}" ]
+            for flag in self.Flags:
+                raw_lines.append(f"+ {flag.name}")
+            
+            match self.Type:
+                case H2FrameType.DATA:
+                    raw_lines.append(f"[{self.Length} Bytes of data]")
+                case H2FrameType.HEADERS | H2FrameType.CONTINUATION:
+                    headers = hpack.DecodeHeaders(self.Payload)
+                    for name, value in headers.items():
+                        raw_lines.append(f"{name} = {value}")
+                case H2FrameType.RST_STEAM:
+                    raw_lines.append(H2ErrorCode(int.from_bytes(self.Payload)).name)
+                case H2FrameType.SETTINGS:
+                    i,j = 0,2
+                    while j < len(self.Payload):
+                        name = H2Settings(int.from_bytes(self.Payload[i:j]))
+                        i  = j
+                        j += 4
+                        value = int.from_bytes(self.Payload[i:j])
+                        raw_lines.append(f"{name} = {value}")
+                        i  = j
+                        j += 2
+                case H2FrameType.PUSH_PROMISE:
+                    raw_lines.append(f"Promised-Stream-ID = {int.from_bytes(self.Payload[:4])}")
+                    headers = hpack.DecodeHeaders(self.Payload[4:])
+                    for name, value in headers.items():
+                        raw_lines.append(f"{name} = {value}")
+                case H2FrameType.PING:
+                    raw_lines.append(''.join([ hex(v)[2:] + ' ' if (i+1)%2 == 0 else hex(v)[2:] for i,v in enumerate(self.Payload) ]))
+                case H2FrameType.GOAWAY:
+                    raw_lines.append(f"Last-Stream-ID = {int.from_bytes(self.Payload[:4])}")
+                    error = int.from_bytes(self.Payload[4:8])
+                    raw_lines.append(f"Error Code = {hex(error)} {H2ErrorCode(error).name}")
+                    try:
+                        raw_lines.append(self.Payload[8:].decode())
+                    except: ''
+                case H2FrameType.WINDOW_UPDATE:
+                    raw_lines.append(f"Window Size Increment = {int.from_bytes(self.Payload)}")
+            
+            return '\n    '.join(raw_lines)
 
     def Raw(self) -> bytes:
-        frame = []
-        frame.append(self.Length.to_bytes(3))
-        frame.append(self.Type.value.to_bytes(1))
-        frame.append(self.RawFlags().to_bytes(1))
-        frame.append(self.StreamID.to_bytes(4))
-        if self.Padding != 0:
-            frame.append(self.Padding.to_bytes(1))
-        frame.append(self.Payload)
-        frame.append(bytes(self.Padding))
+        if not self.IsFinished():
+            raise H2FrameNotFinished()
+        else:
+            frame = []
+            frame.append(self.Length.to_bytes(3))
+            frame.append(self.Type.value.to_bytes(1))
+            frame.append(self.RawFlags().to_bytes(1))
+            frame.append(self.StreamID.to_bytes(4))
+            if self.Padding != 0:
+                frame.append(self.Padding.to_bytes(1))
+            frame.append(self.Payload)
+            frame.append(bytes(self.Padding))
 
-        return b''.join(frame)
+            return b''.join(frame)
+    def __str__(self) -> str:
+        return self.RawFormat()
 
 if __name__ == "__main__":
-    frame = HTTP2_Frame(
-                h2type=H2FrameType.HEADERS,
-                streamID=1,
-                flags=[ H2Flag.END_HEADERS, H2Flag.END_STREAM ],
-                payload=b'\x82\x87\x84A\x0bexample.comS\ttext/htmlQ\x02ruz\x10CubicBrowser/9.7'
-            )
-    print(frame.RawFormat())
-    print('---')
-    print(frame.Raw())
+    sframeS_1 = HTTP2_Frame(
+        h2type  = H2FrameType.SETTINGS,
+        flags   = 0b00000000,
+        payload = b'\x00\x03\x00\x00\x00\x64',
+    )
+    cframeS_1 = HTTP2_Frame(
+        h2type  = H2FrameType.SETTINGS,
+        flags   = 0b00000000,
+        payload = b'\x00\x02\x00\x00\x00\x01\x00\x09\x00\x00\x00\x01',
+    )
+    sframeS_2 = HTTP2_Frame(
+        h2type  = H2FrameType.SETTINGS,
+        flags   = 0b00000001
+    )
+    cframeS_2 = HTTP2_Frame(
+        h2type  = H2FrameType.SETTINGS,
+        flags   = 0b00000001
+    )
+    
+    cframe1_1 = HTTP2_Frame(
+        h2type  = H2FrameType.HEADERS,
+        streamID= 1,
+        flags   = 0b00000101,
+        payload = b'\x82\x86\x84\x41\x0bexample.com\x53\x09text/html\x54\x02ru\x7a\x0eMy-Browser/1.0'
+    )
+    sframe1_1 = HTTP2_Frame(
+        h2type  = H2FrameType.PUSH_PROMISE,
+        streamID= 1,
+        flags   = 0b00000100,
+        payload = b'\x00\x00\x00\x02\x82\x44\x0a/style.css\x86'
+    )
+    sframe1_2 = HTTP2_Frame(
+        h2type  = H2FrameType.HEADERS,
+        streamID= 1,
+        flags   = 0b00000100,
+        payload = b'\x88\x5f\x09text/html'
+    )
+    sframe1_3 = HTTP2_Frame(
+        h2type  = H2FrameType.DATA,
+        streamID= 1,
+        flags   = 0b00000001,
+        payload = os.urandom(2048)
+    )
+
+    sframe2_1 = HTTP2_Frame(
+        h2type  = H2FrameType.HEADERS,
+        streamID= 2,
+        flags   = 0b00000100,
+        payload = b'\x88\x5f\x09style/css'
+    )
+    sframe2_2 = HTTP2_Frame(
+        h2type  = H2FrameType.DATA,
+        streamID= 2,
+        flags   = 0b00001001,
+        padding = 8,
+        payload = os.urandom(256)
+    )
+
+    ping = os.urandom(8)
+    cframeP_1 = HTTP2_Frame(
+        h2type  = H2FrameType.PING,
+        flags   = 0b00000000,
+        payload = ping
+    )
+    sframeP_1 = HTTP2_Frame(
+        h2type  = H2FrameType.PING,
+        flags   = 0b00000001,
+        payload = ping
+    )
+
+    cframeG = HTTP2_Frame(
+        h2type  = H2FrameType.GOAWAY,
+        payload = b'\x00\x00\x00\x00'
+    )
+
+    print('-'*20)
+    print('-'*20)
+    print(sframeS_1)
+    print('-'*20)
+    print(cframeS_1)
+    print('-'*20)
+    print(sframeS_2)
+    print('-'*20)
+    print(cframeS_2)
+    print('-'*20)
+    print()
+    print('-'*20)
+    print(cframe1_1)
+    print('-'*20)
+    print(sframe1_1)
+    print(sframe1_2)
+    print(sframe1_3)
+    print('-'*20)
+    print()
+    print('-'*20)
+    print(sframe2_1)
+    print(sframe2_2)
+    print('-'*20)
+    print()
+    print('-'*20)
+    print(cframeP_1)
+    print('-'*20)
+    print(sframeP_1)
+    print('-'*20)
+    print()
+    print('-'*20)
+    print(cframeG)
+    print('-'*20)
+    print('-'*20)
