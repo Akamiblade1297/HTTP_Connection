@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timezone
 import gzip, zlib, brotli
 from pathlib import Path
-from http_class import HTTP, DATEFORMAT, CWD
+from http_class import HTTP, DATEFORMAT, CWD, Etags
 HOST = '127.0.0.1'
 PORT = 3000
 CHUNK_SIZE = 65536
@@ -16,7 +16,7 @@ ENCODING = [
         "deflate",
         "br",
         ]
-LOGS = Path(f"logs/{datetime.strftime(datetime.now(),'%d-%m-%Y_%H:%M:%S')}")
+LOGS = Path(f"logs/{datetime.strftime(datetime.now(),'%Y-%d-%m-_%H:%M:%S')}")
 LOGS.touch()
 
 def GetModifiedTime(path: Path) -> datetime:
@@ -97,12 +97,12 @@ def Handle_Request(conn: socket.socket, addr: tuple) -> None:
                     match response.StartLine[1]:
                         case "200":
                             if request.GetHeader("If-None-Match") != '':
-                                if response.GetETag(path) != request.GetHeader("If-None-Match"):
+                                if Etags.GetETag(path) != request.GetHeader("If-None-Match"):
                                     response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(304)
                             elif request.GetHeader("If-Match") != '':
-                                if response.GetETag(path) == request.GetHeader("If-Match"):
+                                if Etags.GetETag(path) == request.GetHeader("If-Match"):
                                     response.GetBody(path, request.GetHeader("Range"))
                                 else:
                                     response.StatusCode(412)

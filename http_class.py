@@ -38,10 +38,10 @@ class Etags:
         for i in range(len(etags)): 
             info = etags[i].split(' ')
             if info[0] == relpath: # Check if there's info about file we need in ETags database
-                if info[1] == modtime: # Check if info is valid
+                if info[1] == modtime: # Check if info is outdated
                     return info[2]
                 else:
-                    # Update info if it's invalid
+                    # Update if info is outdated
                     info[1] = modtime
                     info[2] = Etags.GenerateETag(path)
                     etags[i] = ' '.join(info)
