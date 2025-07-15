@@ -161,6 +161,39 @@ class HTTP2_Frame:
                 raw_lines.append(f"{name: <{mlen}} = {value}")
         return raw_lines
         
+    def Raw(self) -> bytes:
+        if not self.IsFinished():
+            raise H2FrameNotFinished()
+        else:
+            frame = []
+            frame.append(self.Length.to_bytes(3))
+            frame.append(self.Type.value.to_bytes(1))
+            frame.append(self.RawFlags().to_bytes(1))
+            frame.append(self.StreamID.to_bytes(4))
+            if H2Flag.PADDED in self.Flags:
+                frame.append(self.Padding.to_bytes(1))
+            frame.append(self.Payload)
+            if H2Flag.PADDED in self.Flags:
+                frame.append(bytes(self.Padding))
+
+            return b''.join(frame)
+    
+    def RawDump(self) -> str:
+        raw = self.Raw()
+        dump_lines = []
+
+        for j in range(0,len(raw),8):
+            hx,txt = [],[]
+            for i in range(8):
+                if j+i >= len(raw): break
+                b = raw[j+i]
+                hx.append(f"{b:02X}")
+                if i == 3:
+                    hx.append('')
+                txt.append( chr(b) if b>=32 and b<=126 else '\033[2m·\033[0m' )
+            dump_lines.append(f"{' '.join(hx): <24} | {' '.join(txt)} ")
+
+        return '\n'.join(dump_lines)
 
     def RawFormat(self, prefix: str = '', hpack: HPACK = HPACK()) -> str:
         if not self.IsFinished():
@@ -206,21 +239,6 @@ class HTTP2_Frame:
             
             return ('\n    ' + prefix).join(raw_lines)
 
-    def Raw(self) -> bytes:
-        if not self.IsFinished():
-            raise H2FrameNotFinished()
-        else:
-            frame = []
-            frame.append(self.Length.to_bytes(3))
-            frame.append(self.Type.value.to_bytes(1))
-            frame.append(self.RawFlags().to_bytes(1))
-            frame.append(self.StreamID.to_bytes(4))
-            if H2Flag.PADDED in self.Flags:
-                frame.append(self.Padding.to_bytes(1))
-            frame.append(self.Payload)
-            frame.append(bytes(self.Padding))
-
-            return b''.join(frame)
     def __str__(self) -> str:
         return self.RawFormat()
 
@@ -382,7 +400,8 @@ if __name__ == "__main__":
     stream = HTTP2_Stream(1, hpack=hpack)
     R1 = HTTP2_Frame (h2type=H2FrameType.HEADERS, 
         streamID = 1,
-        flags    = 5,
+        flags    = 13,
+        padding  = 8,
         payload  = hpack.EncodeHeaders({
             ':method'  :'GET' ,
             ':scheme'  :'http',
@@ -420,30 +439,34 @@ if __name__ == "__main__":
         payload  = b'<!DOCTYPE HTML>\n<head>\n    <title>Sigma Broskie Webp</title>\n</head>\n<body>\n    <h1>Welcome to Sigma Broskie Web Page!</h1>\n</body>'
     )
 
-    print(R1.RawFormat('', hpack=hpack))
-    stream.Receive(R1)
+    print(R1)
+    print()
+    print(R1.RawDump())
 
-    print(S1.RawFormat('                                              ', hpack=hpack))
-    stream.Send(S1)
-    print(S2.RawFormat('                                              ', hpack=hpack))
-    stream.Send(S2)
- 
-    try:
-        print(R2.RawFormat('', hpack=hpack))
-        stream.Receive(R2)
-    except H2ConnectionError as Error:
-        GoAway = HTTP2_Frame(h2type=H2FrameType.GOAWAY,
-            payload = stream.StreamID.to_bytes(4) + Error.Code.to_bytes(4)
-        )
-        print(GoAway.RawFormat('                                              ', hpack=hpack))        
-
-    # while True:
-    #     b = eval(f"b'{input()}'")
-    #     f = HTTP2_Frame(b[1:])
-    #     if b[0] == 0:
-    #         print(f.RawFormat(hpack=stream.Hpack))
-    #         stream.Receive(f)
-    #     elif b[0] == 1:
-    #         print(f.RawFormat('    ',hpack=stream.Hpack))
-    #         stream.Send(f)
-    #     print(stream.State.name)
+ #    print(R1.RawFormat('', hpack=hpack))
+ #    stream.Receive(R1)
+ #
+ #    print(S1.RawFormat('                                              ', hpack=hpack))
+ #    stream.Send(S1)
+ #    print(S2.RawFormat('                                              ', hpack=hpack))
+ #    stream.Send(S2)
+ # 
+ #    try:
+ #        print(R2.RawFormat('', hpack=hpack))
+ #        stream.Receive(R2)
+ #    except H2ConnectionError as Error:
+ #        GoAway = HTTP2_Frame(h2type=H2FrameType.GOAWAY,
+ #            payload = stream.StreamID.to_bytes(4) + Error.Code.to_bytes(4)
+ #        )
+ #        print(GoAway.RawFormat('                                              ', hpack=hpack))        
+ #
+ #    while True:
+ #        b = eval(f"b'{input()}'")
+ #        f = HTTP2_Frame(b[1:])
+ #        if b[0] == 0:
+ #            print(f.RawFormat(hpack=stream.Hpack))
+ #            stream.Receive(f)
+ #        elif b[0] == 1:
+ #            print(f.RawFormat('    ',hpack=stream.Hpack))
+ #            stream.Send(f)
+ #        print(stream.State.name)
