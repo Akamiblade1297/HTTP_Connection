@@ -6,7 +6,7 @@ import threading
 from datetime import datetime, timezone
 import gzip, zlib, brotli
 from pathlib import Path
-from http_class import HTTP, DATEFORMAT, CWD, Etags
+from modules.http import HTTP, DATEFORMAT, CWD, Etags
 HOST = '127.0.0.1'
 PORT = 3000
 CHUNK_SIZE = 65536

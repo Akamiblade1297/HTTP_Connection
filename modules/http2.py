@@ -3,7 +3,7 @@ from enum import Enum, Flag, auto
 from typing import Any
 from hpack import HPACK, CompressionError
 from datetime import datetime, timezone
-from http_class import HTTP, DATEFORMAT, CODES, Etags
+from http import HTTP, DATEFORMAT, CODES, Etags
 
 class H2FrameType(Enum):
     DATA            = 0x00

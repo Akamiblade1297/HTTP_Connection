@@ -51,8 +51,7 @@ class Etags:
         newETag = Etags.GenerateETag(path)
         etags.append(f"{relpath} {modtime} {newETag}")
         ETagDB.write_text('\n'.join(etags))
-        return newETag
-    
+        return newETag    
 
 class HTTP:
     def __init__(self, raw: str|None = None) -> None:

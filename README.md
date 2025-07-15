@@ -2,9 +2,7 @@
 I'm trying to recreate HTTP and HTTPS connection from scratch for educational purpose.  
 I'm using [python-socket](https://docs.python.org/3/library/socket.html) package to use TCP Transport Layer, so I'm building HTTP Application Layer fully from scratch.
 ## How to launch?
-The main files here are [server_HTTP.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/server_HTTP.py) and [http_class.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/http_class.py).  
-I've also added [hpack.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/hpack.py) and [http2.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/http2.py) for HTTP/2.  
-Others here are just for testing.
+`python server_HTTP.py`.  
 ## Things to do
  * HTTP **[✓]**  
     * ETags support **[✓]**  
