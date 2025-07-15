@@ -498,7 +498,7 @@ class HPACK:
     #### DECODING ####
     ##################
 
-    def DecodeHeaders(self, enc: bytes) -> dict[str,str]:
+    def DecodeHeaders(self, enc: bytes, incTable: bool = True) -> dict[str,str]:
         Headers = {}
         i = 0
         while i < len(enc):
@@ -521,7 +521,7 @@ class HPACK:
                         value = enc[i:i+valLen].decode()
                     i+=valLen
                     Headers[name] = value
-                    self.IncrementTable(name, value)
+                    if incTable: self.IncrementTable(name, value)
                 else:
                     nameLen = enc[i]
                     i+=1
@@ -529,7 +529,7 @@ class HPACK:
                         nameLen &= ~128
                         name = HPACK.DecodeHuffman(enc[i:i+nameLen])
                     else:
-                        name = enc[i:i+1+nameLen].decode()
+                        name = enc[i:i+nameLen].decode()
                     i+=nameLen
                     valLen  = enc[i]
                     i+=1
@@ -537,10 +537,10 @@ class HPACK:
                         valLen &= ~128
                         value = HPACK.DecodeHuffman(enc[i:i+valLen])
                     else:
-                        value = enc[i:i+1+valLen].decode()
+                        value = enc[i:i+valLen].decode()
                     i+=valLen
                     Headers[name] = value
-                    self.IncrementTable(name, value)
+                    if incTable: self.IncrementTable(name, value)
             elif HPACK.IsPrefixed(enc[i], '0000'):
                 # print('0000', hex(enc[i]))
                 if enc[i] != 0:
@@ -561,9 +561,9 @@ class HPACK:
                     i+=1
                     if nameLen & 128 != 0:
                         nameLen &= ~128
-                        name = HPACK.DecodeHuffman(enc[i:i+1+nameLen])
+                        name = HPACK.DecodeHuffman(enc[i:i+nameLen])
                     else:
-                        name = enc[i:i+1+nameLen].decode()
+                        name = enc[i:i+nameLen].decode()
                     i+=nameLen
                     valLen  = enc[i]
                     i+=1

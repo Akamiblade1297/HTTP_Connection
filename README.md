@@ -2,12 +2,30 @@
 I'm trying to recreate HTTP and HTTPS connection from scratch for educational purpose.  
 I'm using [python-socket](https://docs.python.org/3/library/socket.html) package to use TCP Transport Layer, so I'm building HTTP Application Layer fully from scratch.
 ## How to launch?
-The main files here are [server.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/server.py) and [http_class.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/http_class.py)  
-Others here are just for testing. Btw, [wordle.html](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/Web/wordle.html) and other related files are from my [Wordle](https://github.com/Akamiblade1297/Wordle) project
+The main files here are [server_HTTP.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/server_HTTP.py) and [http_class.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/http_class.py).  
+I've also added [hpack.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/hpack.py) and [http2.py](https://github.com/Akamiblade1297/HTTP_Connection/blob/master/http2.py) for HTTP/2.  
+Others here are just for testing.
+## Things to do
+ * HTTP **[✓]**  
+    * ETags support **[✓]**  
+    * Cache support **[✓]**  
+    * Pipelining support **[✓]**  
+    * Attachment support **[✓]**  
+    * Ranges support **[✓]**  
+    * Server **[✓]**
+ * HTTP/2 **[WIP]**  
+    * HPACK **[✓]**  
+    * Frames **[✓]**  
+    * Streams **[✓]**  
+    * Connection **[WIP]** 
+ * HTTPS  
+    * TLS
+    * Server
 ## Tools I used for understanding HTTP
 [Wireshark](https://www.wireshark.org/download.html) to check HTTP packages and how should it look like.  
 [Nodejs](https://nodejs.org) with [Express](https://expressjs.com/) to create HTTP server and check out how it works.  
 [HTTPie CLI](https://httpie.io/docs/cli/installation) for forming HTTP Requests and Responses.  
+[Grok](https://grok.com) for asking stupid questions *(never VibeCoded btw.)*  
 ## Refs for useful info about HTTP
 [Alek OS Video](https://www.youtube.com/watch?v=EAqrn9debZ0) (Russian)  
 [Mozilla HTTP Documentation](https://developer.mozilla.org/ru/docs/Web/HTTP)
