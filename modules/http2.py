@@ -471,7 +471,6 @@ class HTTP2_Connection:
         if self.Server:
             preamble = self.Connection.recv(24)
             if preamble != PREAMBLE:
-                self.Connection.close()
                 raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Client Preface")
             frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(65535))
             settings = frames[0]
