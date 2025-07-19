@@ -1,7 +1,7 @@
 import socket, os
 import threading
 from enum import Enum, Flag, auto
-from typing import Any, Callable
+from typing import Any, Callable, Self
 from hpack import HPACK, CompressionError
 from datetime import datetime, timezone
 from http import HTTP, DATEFORMAT, CODES, Etags
@@ -9,6 +9,7 @@ from http import HTTP, DATEFORMAT, CODES, Etags
 PREAMBLE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
 class H2FrameType(Enum):
+    UNDEFINED       = -1
     DATA            = 0x00
     HEADERS         = 0x01
     RST_STREAM      = 0x03
@@ -78,47 +79,90 @@ class H2StreamState(Enum):
 class H2InternalError(Exception):
     def __init__(self, message: str) -> None:
         self.message = message
-        super().__init__(message)
 
 class H2ConnectionError(Exception):
     def __init__(self, code: H2ErrorCode, DebugInfo: str = '') -> None:
         message = f"{hex(code.value)} {code.name} {DebugInfo}"
         self.Code = code.value
         self.message = message
-        super().__init__(message)
 
 class H2StreamError(Exception):
     def __init__(self, code: H2ErrorCode, DebugInfo: str = '') -> None:
         message = f"{hex(code.value)} {code.name} {DebugInfo}"
         self.Code = code.value
         self.message = message
-        super().__init__(message)
 
 class HTTP2_Frame:
-    def __init__(self, raw: bytes|None = None, h2type: H2FrameType = H2FrameType.DATA, flags: H2Flag|int = H2Flag(0), streamID: int = 0, payload: bytes = b'', padding: int = 0) -> None:
-        if raw != None:
-            self.Length   = int.from_bytes(raw[:3])
-            self.Type     = H2FrameType(raw[3])
-            self.Flags    = self.ParseFlags(raw[4], self.Type)
-            self.StreamID = int.from_bytes(raw[5:9]) & ~(1<<31)
-            if H2Flag.PADDED in self.Flags:
-                self.Padding = raw[9]
-                self.Payload = raw[10:-self.Padding]
-            else:
-                self.Padding = 0
-                self.Payload  = raw[9:]
-            if self.StreamID > (2**31-1): raise H2InternalError("StreamID is too large.")
-        else:
-            self.Length   = 0
-            self.Type     = h2type
-            self.Flags    = flags if type(flags) == H2Flag else self.ParseFlags(flags, self.Type)
-            self.StreamID = streamID
-            self.Padding  = padding
-            self.Payload  = payload
-            self.CalculateLength()
+    def __init__(self, h2type: H2FrameType = H2FrameType(-1), flags: H2Flag|int = H2Flag(0), streamID: int = 0, payload: bytes = b'', padding: int = 0, hpack: HPACK = HPACK()) -> None:
+        self.Hpack    :HPACK       = hpack
+        self.Length   :int         = 0
+        self.Type     :H2FrameType = h2type
+        self.Flags    :H2Flag      = flags if type(flags) == H2Flag else self.ParseFlags(flags, self.Type)
+        self.StreamID :int         = streamID
+        self.Padding  :int         = padding
+        self.Payload  :bytes       = payload
 
-    def CalculateLength(self) -> None:
-        self.Length = len(self.Payload) + ( self.Padding + 1 if H2Flag.PADDED in self.Flags else 0)
+        self.CalculateLength()
+
+        if self.StreamID > 2**31-1:
+            raise ValueError("StreamID Can't be larger then 2^31-1")
+        if H2Flag.PADDED in self.Flags and self.Padding >= self.Length:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Pad Length must be less then than Payload Length")
+    #################
+    #### FACTORY ####
+    #################
+    def __new__(cls, *args, **kwargs) -> object:
+        if len(args) == 0:
+            if 'h2type' not in kwargs.keys():
+                raise ValueError("'h2type' Keyword Argument of type 'H2FrameType' or 1 Positional Argument of type 'bytes' expected")
+            return object.__new__(eval(f"HTTP2_{kwargs['h2type'].name}"))
+        elif len(args) == 1 and type(args[0]) == bytes:
+            parsed_kwargs = HTTP2_Frame.__ParseRawFrame(args[0])
+            parsed_kwargs['hpack'] = kwargs['hpack']
+            return HTTP2_Frame.__new__(cls, **parsed_kwargs)
+        else:
+            raise ValueError("'h2type' Keyword Argument of type 'H2FrameType' or 1 Positional Argument of type 'bytes' expected")
+    #################
+    #### FACTORY ####
+    #################
+    @staticmethod
+    def __ParseRawFrame(raw: bytes) -> dict[str,Any]:
+        Length   = int.from_bytes(raw[:3])
+        H2type   = H2FrameType(raw[3])
+        Flags    = HTTP2_Frame.ParseFlags(raw[4], H2type)
+        StreamID = int.from_bytes(raw[5:9])
+        
+        if H2Flag.PADDED in Flags:
+            Padding = raw[9]
+            Payload = raw[10:]
+        else:
+            Padding = 0
+            Payload = raw[9:]
+
+        if StreamID > 2**31-1     : raise ValueError("Stream ID Can't be larger then 2^31-1")
+        if len(Payload) != Length : raise ValueError("Length field doesn't match the actual Payload length")
+
+        return {
+                'h2type'   : H2type   ,
+                'flags'    : Flags    ,
+                'streamID' : StreamID ,
+                'padding'  : Padding  ,
+                'payload'  : Payload  ,
+               }
+
+    @staticmethod
+    def ParseRaw(raw: bytes) -> tuple[list,bytes]:
+        frames = []
+        i = 0
+        while i < len(raw):
+            try:
+                length = int.from_bytes(raw[i:i+3])
+                frame_full_size = 9+length
+                frames.append(HTTP2_Frame(raw[i:i+frame_full_size]))
+                i += frame_full_size
+            except IndexError:
+                break
+        return (frames, raw[i:])
 
     @staticmethod
     def ParseFlags(flagsRaw: int, h2type: H2FrameType) -> H2Flag:
@@ -136,62 +180,6 @@ class HTTP2_Frame:
         elif H2Flag.PADDED in flags and h2type not in [H2FrameType.DATA, H2FrameType.HEADERS, H2FrameType.PUSH_PROMISE]:
             raise H2InternalError(f"Unexpected PADDED Flag for {h2type} Frame")
         return flags
-    
-    def RawFlags(self) -> int:
-        flagsRaw = 0
-        for flag in self.Flags:
-            flagsRaw += flag.value if flag != H2Flag.ACK else 1
-        return flagsRaw
-
-    @staticmethod
-    def ParseRaw(raw: bytes) -> tuple[list,bytes]:
-        frames = []
-        i = 0
-        while i < len(raw):
-            try:
-                length = int.from_bytes(raw[i:i+3])
-                frame_full_size = 9+length
-                frames.append(HTTP2_Frame(raw[i:i+frame_full_size]))
-                i += frame_full_size
-            except IndexError:
-                break
-        return (frames, raw[i:])
-
-    def ParsePayload(self, hpack: HPACK = HPACK()) -> Any:
-        match self.Type:
-            case H2FrameType.DATA | H2FrameType.PING:
-                return self.Payload
-            case H2FrameType.HEADERS| H2FrameType.CONTINUATION:
-                headers = hpack.DecodeHeaders(self.Payload)
-                return headers
-            case H2FrameType.PUSH_PROMISE:
-                promissed_stream = int.from_bytes(self.Payload[:4])
-                headers          = hpack.DecodeHeaders(self.Payload[4:])
-                return (headers, promissed_stream)
-            case H2FrameType.RST_STREAM:
-                error = H2ErrorCode(int.from_bytes(self.Payload))
-                return error
-            case H2FrameType.GOAWAY:
-                last_stream = int.from_bytes(self.Payload[:4])
-                error       = H2ErrorCode(self.Payload[4:8])
-                try:    debug_info = self.Payload[8:]
-                except: debug_info = ''
-                return ( last_stream, error, debug_info ) 
-            case H2FrameType.SETTINGS:
-                settings = []
-                i,j = 0,2
-                while j < len(self.Payload):
-                    name = int.from_bytes(self.Payload[i:j])
-                    i  = j
-                    j += 4
-                    value = int.from_bytes(self.Payload[i:j])
-                    i  = j
-                    j += 2
-                    settings.append((name,value))
-                return settings
-            case H2FrameType.WINDOW_UPDATE:
-                increment = int.from_bytes(self.Payload)
-                return increment
 
     @staticmethod
     def FormatHeaders(headers: dict[str,str]) -> list[str]:
@@ -204,7 +192,19 @@ class HTTP2_Frame:
                 raw_lines.append(f"{name: <{mlen}} = {value}")
 
         return raw_lines
-        
+
+    def CalculateLength(self) -> None:
+        self.Length = len(self.Payload) + ( self.Padding + 1 if H2Flag.PADDED in self.Flags else 0)
+ 
+    def RawFlags(self) -> int:
+        flagsRaw = 0
+        for flag in self.Flags:
+            flagsRaw += flag.value if flag != H2Flag.ACK else 1
+        return flagsRaw
+
+    def ParsePayload(self) -> Any:
+        return "UNDEFINED"
+
     def Raw(self) -> bytes:
         frame = []
         frame.append(self.Length.to_bytes(3))
@@ -236,40 +236,179 @@ class HTTP2_Frame:
 
         return '\n'.join(dump_lines)
 
-    def RawFormat(self, prefix: str = '', hpack: HPACK = HPACK()) -> str:
-        parsed = self.ParsePayload(hpack)
-        raw_lines = [ f"{prefix}{self.Type.name}/{self.StreamID}" ]
-        for flag in self.Flags:
-            raw_lines.append(f"+ {flag.name}")
-        
-        match self.Type:
-            case H2FrameType.DATA:
-                raw_lines.append(f"[{self.Length} Bytes of data]")
-            case H2FrameType.HEADERS | H2FrameType.CONTINUATION:
-                raw_lines += self.FormatHeaders(parsed)
-            case H2FrameType.RST_STREAM:
-                raw_lines.append(f"{parsed.value} {parsed.name}")
-            case H2FrameType.SETTINGS:
-                for name, value in parsed:
-                    raw_lines.append(f"{H2Setting(name).name} = {value}")
-            case H2FrameType.PUSH_PROMISE:
-                raw_lines.append(f"Promised-Stream-ID = {parsed[0]}")
-                raw_lines += self.FormatHeaders(parsed[1])
-            case H2FrameType.PING:
-                raw_lines.append(''.join([ hex(v)[2:] + ' ' if (i+1)%2 == 0 else hex(v)[2:] for i,v in enumerate(parsed) ]))
-            case H2FrameType.GOAWAY:
-                raw_lines.append(f"Last-Stream-ID = {int.from_bytes(parsed[0])}")
-                raw_lines.append(f"Error Code = {hex(parsed[1].value)} {parsed[1].name}")
-                raw_lines.append(parsed[2])
-            case H2FrameType.WINDOW_UPDATE:
-                raw_lines.append(f"Window Size Increment = {parsed[0]}")
-        
-        return ('\n    ' + prefix).join(raw_lines)
+    @staticmethod
+    def formatdecorator(func: Callable) -> Callable:
+        def wrapper(frame, prefix = '') -> str:
+            raw_lines = [ f"{prefix}{frame.Type.name}/{frame.StreamID}" ]
+            for flag in frame.Flags:
+                raw_lines.append(f"+ {flag.name}")
+            raw_lines: list[str] = func(frame, prefix, raw_lines)
+            return ('\n    ' + prefix).join(raw_lines)
+
+        return wrapper
+
+    @formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        raw_lines.append("UNDEFINED")
+        return raw_lines
 
     def __eq__(self, other) -> bool:
         if type(other) != HTTP2_Frame:
             raise TypeError(f"Can't compare HTTP2_Frame to {type(other)}")
         return (other.Raw() == self.Raw())
+
+class HTTP2_DATA(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID == 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "DATA Frame must differ from 0")
+
+    def ParsePayload(self) -> bytes:
+        return self.Payload
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        raw_lines.append(f"[{self.Length} bytes of Data]")
+        return raw_lines
+
+class HTTP2_HEADERS(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID == 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "HEADERS Frame StreamID must differ from 0")
+
+    def ParsePayload(self) -> dict[str,str]:
+        return self.Hpack.DecodeHeaders(self.Payload)
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]: 
+        headers = self.ParsePayload()
+        raw_lines += HTTP2_Frame.FormatHeaders(headers) 
+        return raw_lines
+
+class HTTP2_RST_STREAM(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID != 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "RST_STREAM Frame StreamID must be set to 0")
+        elif self.Length != 4:
+            raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "RST_STREAM Frame Payload Length must be 4 Octets long")
+
+    def ParsePayload(self) -> H2ErrorCode:
+        return H2ErrorCode(int.from_bytes(self.Payload))
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        error = self.ParsePayload()
+
+        raw_lines.append(f"{error.value} {error.name}")
+        return raw_lines
+
+class HTTP2_SETTINGS(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID != 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "SETTINGS Frame StreamID must be set to 0")
+        elif H2Flag.ACK in self.Flags and self.Length > 0:
+            raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "SETTINGS Frame Payload with ACK Flag must be empty")
+        elif self.Length % 6 != 0:
+            raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "SETTINGS Frame Payload Length must be a multiple of 6")
+
+    def ParsePayload(self) -> dict[int,int]:
+        settings = {}
+        i,j = 0,2
+        while j < len(self.Payload):
+            setting = int.from_bytes(self.Payload[i:j])
+            i,j = j,j+4
+            value = int.from_bytes(self.Payload[i:j])
+            settings[setting] = value
+            i,j = j,j+2
+        return settings
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        settings = self.ParsePayload()
+
+        for setting, value in settings.items():
+            raw_lines.append(f"{H2Setting(setting).name} = {value}")
+        return raw_lines
+
+class HTTP2_PUSH_PROMISE(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID == 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "PUSH_PROMISE Frame StreamID must differ from 0")
+
+    def ParsePayload(self) -> tuple[int,dict[str,str]]:
+        promised_streamID = int.from_bytes(self.Payload[:4])
+        headers           = self.Hpack.DecodeHeaders(self.Payload[4:])
+        return (promised_streamID, headers)
+    
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        promised_streamID, headers = self.ParsePayload() 
+
+        raw_lines.append(f"Promissed-Stream-ID: {promised_streamID}")
+        raw_lines += HTTP2_Frame.FormatHeaders(headers)
+        return raw_lines
+
+class HTTP2_PING(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID != 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "PING Frame StreamID must be set to 0")
+        elif self.Length != 8:
+            raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "PING Frame Payload Length must be 8 Octets long")
+
+    def ParsePayload(self) -> bytes:
+        return self.Payload
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        data = self.ParsePayload()
+        raw_lines.append(' '.join([ f"{x:02X}" if (i+1)%4 != 0 else f"{x:02X} " for i,x in enumerate(data) ]))
+        return raw_lines
+
+class HTTP2_GOAWAY(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.StreamID != 0:
+            raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "GOAWAY Frame StreamID must be set to 0")
+    def ParsePayload(self) -> tuple[int,H2ErrorCode]:
+        last_streamID = int.from_bytes(self.Payload[:4])
+        error         = H2ErrorCode(self.Payload[4:])
+        return (last_streamID, error)
+
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        last_streamID, error = self.ParsePayload()
+        raw_lines.append(f"Last-Stream-ID = {last_streamID}")
+        raw_lines.append(f"{error.value} {error.name}")
+        return raw_lines
+
+class HTTP2_WINDOW_UPDATE(HTTP2_Frame):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        increment = self.ParsePayload()
+        if increment == 0:
+            if self.StreamID == 0:
+                raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Window Increment Size must differ from 0")
+            else:
+                raise H2StreamError(H2ErrorCode.PROTOCOL_ERROR, "Window Increment Size must differ from 0")
+        elif self.Length != 4:
+            raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "WINDOU_UPDATE Frame Payload Lenght must be 4 Octets long")
+
+    def ParsePayload(self) -> int:
+        return int.from_bytes(self.Payload)
+    
+    @HTTP2_Frame.formatdecorator
+    def RawFormat(self, prefix: str = '', raw_lines: list[str] = []) -> list[str]:
+        increment = self.ParsePayload()
+        raw_lines.append(f"Window Size Increment = {increment}")
+        return raw_lines
+
+class HTTP2_CONTINUATION(HTTP2_HEADERS):
+    ''
 
 ACK = HTTP2_Frame(h2type=H2FrameType.SETTINGS,
     flags = 1
@@ -428,6 +567,24 @@ class HTTP2_Stream:
         
         return (pseudo, headers)
 
+class HTTP2_StreamList:
+    def __init__(self) -> None:
+        self.Streams: set[HTTP2_Stream] = set()
+
+    def __getitem__(self, streamID: int) -> HTTP2_Stream:
+        for stream in self.Streams:
+            if stream.StreamID == streamID:
+                return stream
+        stream = HTTP2_Stream(streamID)
+        self.Streams.add(stream)
+        return stream
+
+    def Reserve(self, streamID: int, server: bool = True) -> None:
+        if server:
+            self[streamID].State = H2StreamState.RESERVED_LOCAL
+        else:
+            self[streamID].State = H2StreamState.RESERVED_REMOTE
+
 class HTTP2_Connection:
     def __init__(self, conn: socket.socket, server: bool = True):
         self.Settings   :dict[int,int]     = {}
@@ -435,6 +592,7 @@ class HTTP2_Connection:
         self.Hpack      :HPACK             = HPACK()
         self.Server     :bool              = server
         self.Connection :socket.socket     = conn
+        self.Streams    :HTTP2_StreamList  = HTTP2_StreamList()
         
         self.SetSetting(H2Setting.SETTINGS_NO_RFC7540_PRIORITIES, 1)
 
@@ -489,9 +647,9 @@ class HTTP2_Connection:
             try:
                 frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(10))
                 if frames[0] != ACK:
-                    raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "No ACK Frame received")
+                    raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "No ACK Frame received")
             except TimeoutError:
-                raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "No ACK Frame received")
+                raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "No ACK Frame received")
             print("Connection Established.\n\nQueue:")
             print('\n\n'.join([frame.RawFormat(hpack=self.Hpack) for frame in self.Queued]))
         else:
@@ -516,7 +674,7 @@ class HTTP2_Connection:
 
                 frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(65535))
                 if frames[0] != ACK:
-                    raise H2InternalError("No ACK Frame received")
+                    raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "No ACK Frame received")
             elif len(frames) == 2:
                 if not ( frames[0].Type == H2FrameType.SETTINGS and frames[0].RawFlags() == 0 and frames[1] == ACK ):
                     raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Server Preface")
@@ -526,23 +684,10 @@ class HTTP2_Connection:
 
 if __name__ == "__main__":
     hpack = HPACK()
-    server = socket.socket()
-    server.bind(('localhost',3000))
-    server.listen()
-    conn, _ = server.accept()
-    conn.settimeout(5)
-    Connection = HTTP2_Connection(conn)
+    a = HTTP2_Frame(h2type=H2FrameType.SETTINGS,
+        streamID = 1,
 
-    Connection.Preface()
-
- #
- #    while True:
- #        b = eval(f"b'{input()}'")
- #        f = HTTP2_Frame(b[1:])
- #        if b[0] == 0:
- #            print(f.RawFormat(hpack=stream.Hpack))
- #            stream.Receive(f)
- #        elif b[0] == 1:
- #            print(f.RawFormat('    ',hpack=stream.Hpack))
- #            stream.Send(f)
- #        print(stream.State.name)
+    )
+    print(a.RawFormat())
+    print()
+    print(a.RawDump())
