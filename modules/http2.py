@@ -120,8 +120,10 @@ class HTTP2_Frame:
             return object.__new__(eval(f"HTTP2_{kwargs['h2type'].name}"))
         elif len(args) == 1 and type(args[0]) == bytes:
             parsed_kwargs = HTTP2_Frame.__ParseRawFrame(args[0])
-            parsed_kwargs['hpack'] = kwargs['hpack']
-            return HTTP2_Frame.__new__(cls, **parsed_kwargs)
+            print(parsed_kwargs)
+            if 'hpack' in kwargs.keys():
+                parsed_kwargs['hpack'] = kwargs['hpack']
+            return HTTP2_Frame(**parsed_kwargs)
         else:
             raise ValueError("'h2type' Keyword Argument of type 'H2FrameType' or 1 Positional Argument of type 'bytes' expected")
     #################
@@ -255,9 +257,12 @@ class HTTP2_Frame:
         return raw_lines
 
     def __eq__(self, other) -> bool:
-        if type(other) != HTTP2_Frame:
-            raise TypeError(f"Can't compare HTTP2_Frame to {type(other)}")
-        return (other.Raw() == self.Raw())
+        if type(other) == HTTP2_Frame:
+            return ( other.Raw() == self.Raw() )
+        elif type(other) == bytes:
+            return ( other == self.Raw() )
+        else:
+            return False
 
 class HTTP2_DATA(HTTP2_Frame):
     def __init__(self, *args, **kwargs) -> None:
@@ -276,6 +281,8 @@ class HTTP2_DATA(HTTP2_Frame):
 class HTTP2_HEADERS(HTTP2_Frame):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        print(self.__dict__)
+        print(self.RawDump())
         if self.StreamID == 0:
             raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "HEADERS Frame StreamID must differ from 0")
 
@@ -399,9 +406,6 @@ class HTTP2_WINDOW_UPDATE(HTTP2_Frame):
                 raise H2StreamError(H2ErrorCode.PROTOCOL_ERROR, "Window Increment Size must differ from 0")
         elif self.Length != 4:
             raise H2ConnectionError(H2ErrorCode.FRAME_SIZE_ERROR, "WINDOU_UPDATE Frame Payload Lenght must be 4 Octets long")
-
-    @staticmethod
-    def 
 
     def ParsePayload(self) -> int:
         return int.from_bytes(self.Payload)
@@ -598,13 +602,10 @@ class HTTP2_Connection:
 
         self.Settings      :dict[int,int]     = {}
         self.Queued        :list[HTTP2_Frame] = []
-        self.ZeroQueued       :list[HTTP2_Frame] = []
+        self.ZeroQueued    :list[HTTP2_Frame] = []
         self.Hpack         :HPACK             = HPACK()
         self.Streams       :HTTP2_StreamList  = HTTP2_StreamList()
         self.Last_StreamID :int               = 0
-        self.AwaitingSett  :int               = -1
-        self.AwaitingPing  :int               = -1
-        self.PingSequence  :bytes             = bytes(8)
         self.WindowSelf    :int               = 0
         self.WindowPeer    :int               = 0
         
@@ -620,7 +621,8 @@ class HTTP2_Connection:
         self.Settings[setting.value] = value
 
     def SetSettingsTable(self, settings: dict[int,int]) -> None:
-        self.Settings = settings
+        for setting, value in settings.items():
+            self.Settings[setting] = value
 
     def SettingsRaw(self) -> bytes:
         return b''.join([ code.to_bytes(2) + value.to_bytes(4) if value != DEFAULT_SETTINGS[code] else b'' for code, value in self.Settings.items() ])
@@ -663,37 +665,33 @@ class HTTP2_Connection:
         )
         self.Connection.send(goaway.Raw())
 
-    def isACK(self, frame: HTTP2_Frame, h2type: H2FrameType) -> bool:
-        if frame.Type == h2type == H2FrameType.SETTINGS:
-            return frame == SETTINGS_ACK
-        elif frame.Type == h2type == H2FrameType.PING:
-            return frame.Flags == H2Flag.ACK and frame.Payload == self.PingSequence
+    def isACK(self, frame: HTTP2_Frame, ping: bytes = b'') -> bool:
+        if ping:
+            return frame.Type == H2FrameType.PING and frame.Flags == H2Flag.ACK and frame.Payload == self.PingSequence
         else:
-            return False
+            return frame == SETTINGS_ACK
 
-    def AwaitACK(self):
+    def AwaitACK(self, ping: bytes = b''):
+        timeout = self.Timeout
         while True:
-            time.sleep(1)
-            if self.AwaitingSett != -1:
-                if self.AwaitingSett > 0:
+            if ping:
+                if len(ping) != 8:
+                    self.Shutdown(H2ErrorCode.INTERNAL_ERROR, "Ping sequence must be 8 bytes")
+                if timeout > 0:
                     for frame in self.ZeroQueued:
-                        if self.isACK(frame, H2FrameType.SETTINGS):
-                            self.AwaitingSett = -1
-                            break
-                    else:
-                        self.AwaitingSett-=1
-                else:
-                    self.Shutdown(H2ErrorCode.SETTINGS_TIMEOUT, "SETTINGS Frame wasn't Acknowledged")
-            if self.AwaitingPing:
-                if self.AwaitingPing > 0:
-                    for frame in self.ZeroQueued:
-                        if self.isACK(frame, H2FrameType.PING):
-                            self.AwaitingPing = -1
-                            break
-                    else:
-                        self.AwaitingPing-=1
+                        if self.isACK(frame, ping):
+                            return
                 else:
                     self.Shutdown(H2ErrorCode.SETTINGS_TIMEOUT, "PING Frame wasn't Acknowledged")
+            else:
+                if timeout > 0:
+                    for frame in self.ZeroQueued:
+                        if self.isACK(frame):
+                            return
+                else:
+                    self.Shutdown(H2ErrorCode.SETTINGS_TIMEOUT, "SETTINGS Frame wasn't Acknowledged")
+            timeout-=1
+            time.sleep(1)
 
     def Ping(self) -> None:
         self.PingSequence = os.urandom(8)
@@ -712,29 +710,24 @@ class HTTP2_Connection:
         if self.Server:
             preamble = self.Connection.recv(24)
             if preamble != PREAMBLE:
-                raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Client Preface")
+                self.Shutdown(H2ErrorCode.PROTOCOL_ERROR, "Invalid Client Preface")
             frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(65535))
             settings = frames[0]
             if settings.Type == H2FrameType.SETTINGS:
                 for name, value in settings.ParsePayload():
                     self.Settings[name] = value
             else:
-                raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Client Preface")
+                self.Shutdown(H2ErrorCode.PROTOCOL_ERROR, "Invalid Client Preface")
             self.Queue(frames[1:])
             
             settings = HTTP2_Frame (h2type=H2FrameType.SETTINGS,
                 payload = self.SettingsRaw()
             )
             self.Connection.send(settings.Raw() + SETTINGS_ACK.Raw())
+            threading.Thread(target=self.AwaitACK).start()
 
-            try:
-                frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(10))
-                if frames[0] != SETTINGS_ACK:
-                    raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "SETTINGS Frame wasn't Acknowledged")
-            except TimeoutError:
-                raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "SETTINGS Frame wasn't Acknowledged")
             print("Connection Established.\n\nQueue:")
-            print('\n\n'.join([frame.RawFormat(hpSETTINGS_ACK=self.Hpack) for frame in self.Queued]))
+            print('\n\n'.join([frame.RawFormat(hpack=self.Hpack) for frame in self.Queued]))
         else:
             settings = HTTP2_Frame (h2type=H2FrameType.SETTINGS,
                 payload = self.SettingsRaw()
@@ -746,24 +739,23 @@ class HTTP2_Connection:
             )
             
             self.Connection.send(PREAMBLE + settings.Raw() + request.Raw())
+            threading.Thread(target=self.AwaitACK).start()
             
-            frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(65535))
-            if len(frames) == 1:
-                if not ( frames[0].Type == H2FrameType.SETTINGS and frames[0].RawFlags() == 0):
-                    raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Server Preface")
-                for name, value in frames[0].ParsePayload():
-                    self.Settings[name] = value
-                self.Connection.send(SETTINGS_ACK.Raw())
-
+            def AwaitSettings(n=2) -> bool:
+                if n == 0:
+                    return False
                 frames, _ = HTTP2_Frame.ParseRaw(self.Connection.recv(65535))
-                if frames[0] != SETTINGS_ACK:
-                    raise H2ConnectionError(H2ErrorCode.SETTINGS_TIMEOUT, "SETTINGS Frame wasn't Acknowledged")
-            elif len(frames) == 2:
-                if not ( frames[0].Type == H2FrameType.SETTINGS and frames[0].RawFlags() == 0 and frames[1] == SETTINGS_ACK ):
-                    raise H2ConnectionError(H2ErrorCode.PROTOCOL_ERROR, "Invalid Server Preface")
-                for name, value in frames[0].ParsePayload():
-                    self.Settings[name] = value
-                self.Connection.send(SETTINGS_ACK.Raw())
+                self.Queue(frames)
+                for frame in self.ZeroQueued:
+                    if frame.Type == H2FrameType.SETTINGS:
+                        self.Connection.send(SETTINGS_ACK.Raw())
+                        self.SetSettingsTable(frame.ParsePayload()) 
+                        return True
+                else:
+                    return AwaitSettings(n-1)
+            if not AwaitSettings():
+                self.Shutdown(H2ErrorCode.PROTOCOL_ERROR, "Invalid Server Preface")
+
 
     def Loopback(self, func: Callable) -> None:
         if self.Server:
@@ -771,11 +763,10 @@ class HTTP2_Connection:
             self.Queue(frames)
 
 if __name__ == "__main__":
-    hpack = HPACK()
-    a = HTTP2_Frame(h2type=H2FrameType.SETTINGS,
-        streamID = 1,
-
-    )
-    print(a.RawFormat())
-    print()
-    print(a.RawDump())
+    serv = socket.socket()
+    serv.bind(('localhost',3000))
+    serv.listen(1)
+    conn, addr = serv.accept()
+    print(f"{addr[0]}:{addr[1]} has established Connection.")
+    Conn = HTTP2_Connection(conn)
+    Conn.Preface()
